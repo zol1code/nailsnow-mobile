@@ -148,7 +148,10 @@ export default function DesignerDashboard() {
           </View>
 
           <View style={styles.headerActions}>
-            <Pressable style={styles.iconButton}>
+            <Pressable
+  style={styles.iconButton}
+  onPress={() => alert('No new notifications')}
+>
               <Ionicons
                 name="notifications-outline"
                 size={18}
