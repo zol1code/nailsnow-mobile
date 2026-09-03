@@ -401,17 +401,25 @@ const [scheduleTimes, setScheduleTimes] = useState({
 
                   {available ? (
                     <View style={styles.hours}>
-                      <Text style={styles.hourBox}>
-  {scheduleTimes[day as keyof typeof scheduleTimes].start}
-</Text>s
+                      <Pressable
+  onPress={() => alert(`Change opening time for ${day}`)}
+>
+  <Text style={styles.hourBox}>
+    {scheduleTimes[day as keyof typeof scheduleTimes].start}
+  </Text>
+</Pressable>
 
                       <Text style={styles.dash}>
                         —
                       </Text>
 
-                     <Text style={styles.hourBox}>
-  {scheduleTimes[day as keyof typeof scheduleTimes].end}
-</Text>
+                     <Pressable
+  onPress={() => alert(`Change closing time for ${day}`)}
+>
+  <Text style={styles.hourBox}>
+    {scheduleTimes[day as keyof typeof scheduleTimes].end}
+  </Text>
+</Pressable>
                     </View>
                   ) : (
                     <Text style={styles.unavailable}>
