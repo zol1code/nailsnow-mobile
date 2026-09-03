@@ -64,6 +64,15 @@ export default function DesignerDashboard() {
   'Saturday',
 ]);
 
+const [scheduleTimes, setScheduleTimes] = useState({
+  Monday: { start: '9:00 AM', end: '6:00 PM' },
+  Tuesday: { start: '9:00 AM', end: '6:00 PM' },
+  Wednesday: { start: '9:00 AM', end: '6:00 PM' },
+  Thursday: { start: '9:00 AM', end: '6:00 PM' },
+  Friday: { start: '9:00 AM', end: '6:00 PM' },
+  Saturday: { start: '9:00 AM', end: '6:00 PM' },
+  Sunday: { start: '9:00 AM', end: '6:00 PM' },
+});
   const tabs = ['Overview', 'Portfolio', 'Schedule', 'Requests'];
 
   const stats = [
@@ -393,16 +402,16 @@ export default function DesignerDashboard() {
                   {available ? (
                     <View style={styles.hours}>
                       <Text style={styles.hourBox}>
-                        9:00 AM
-                      </Text>
+  {scheduleTimes[day as keyof typeof scheduleTimes].start}
+</Text>s
 
                       <Text style={styles.dash}>
                         —
                       </Text>
 
-                      <Text style={styles.hourBox}>
-                        6:00 PM
-                      </Text>
+                     <Text style={styles.hourBox}>
+  {scheduleTimes[day as keyof typeof scheduleTimes].end}
+</Text>
                     </View>
                   ) : (
                     <Text style={styles.unavailable}>
