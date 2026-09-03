@@ -73,6 +73,30 @@ const [scheduleTimes, setScheduleTimes] = useState({
   Saturday: { start: '9:00 AM', end: '6:00 PM' },
   Sunday: { start: '9:00 AM', end: '6:00 PM' },
 });
+
+const timeOptions = [
+  '7:00 AM',
+  '8:00 AM',
+  '9:00 AM',
+  '10:00 AM',
+  '11:00 AM',
+  '12:00 PM',
+  '1:00 PM',
+  '2:00 PM',
+  '3:00 PM',
+  '4:00 PM',
+  '5:00 PM',
+  '6:00 PM',
+  '7:00 PM',
+  '8:00 PM',
+  '9:00 PM',
+];
+
+const [editingTime, setEditingTime] = useState<{
+  day: string;
+  type: 'start' | 'end';
+} | null>(null);
+
   const tabs = ['Overview', 'Portfolio', 'Schedule', 'Requests'];
 
   const stats = [
@@ -402,7 +426,12 @@ const [scheduleTimes, setScheduleTimes] = useState({
                   {available ? (
                     <View style={styles.hours}>
                       <Pressable
-  onPress={() => alert(`Change opening time for ${day}`)}
+  onPress={() =>
+  setEditingTime({
+    day,
+    type: 'start',
+  })
+}
 >
   <Text style={styles.hourBox}>
     {scheduleTimes[day as keyof typeof scheduleTimes].start}
@@ -414,7 +443,14 @@ const [scheduleTimes, setScheduleTimes] = useState({
                       </Text>
 
                      <Pressable
-  onPress={() => alert(`Change closing time for ${day}`)}
+  
+  onPress={() =>
+    setEditingTime({
+      day,
+      type: 'end',
+    })
+  }
+>
 >
   <Text style={styles.hourBox}>
     {scheduleTimes[day as keyof typeof scheduleTimes].end}
