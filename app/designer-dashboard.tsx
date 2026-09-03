@@ -139,7 +139,7 @@ export default function DesignerDashboard() {
         <View style={styles.headerTop}>
           <View>
             <Text style={styles.welcome}>
-              Welcome back
+              Welcome back!
             </Text>
 
             <Text style={styles.name}>
