@@ -332,7 +332,10 @@ export default function DesignerDashboard() {
                 {portfolio.length} photos
               </Text>
 
-              <Pressable style={styles.addPhotosButton}>
+              <Pressable
+  style={styles.addPhotosButton}
+  onPress={() => alert('Add Photos')}
+>
                 <Ionicons
                   name="add"
                   size={15}
