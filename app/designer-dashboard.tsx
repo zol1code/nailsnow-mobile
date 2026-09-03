@@ -451,7 +451,6 @@ const [editingTime, setEditingTime] = useState<{
     })
   }
 >
->
   <Text style={styles.hourBox}>
     {scheduleTimes[day as keyof typeof scheduleTimes].end}
   </Text>
@@ -488,7 +487,48 @@ const [editingTime, setEditingTime] = useState<{
             })}
           </View>
         )}
+  {editingTime && (
+  <View style={styles.timePickerBox}>
+    <Text style={styles.timePickerTitle}>
+      Choose {editingTime.type === 'start' ? 'opening' : 'closing'} time
+    </Text>
 
+    <View style={styles.timeOptionsGrid}>
+      {timeOptions.map((time) => (
+        <Pressable
+          key={time}
+          style={styles.timeOption}
+          onPress={() => {
+            const dayKey = editingTime.day as keyof typeof scheduleTimes;
+
+            setScheduleTimes((prev) => ({
+              ...prev,
+              [dayKey]: {
+                ...prev[dayKey],
+                [editingTime.type]: time,
+              },
+            }));
+
+            setEditingTime(null);
+          }}
+        >
+          <Text style={styles.timeOptionText}>
+            {time}
+          </Text>
+        </Pressable>
+      ))}
+    </View>
+
+    <Pressable
+      style={styles.cancelTimePicker}
+      onPress={() => setEditingTime(null)}
+    >
+      <Text style={styles.cancelTimePickerText}>
+        Cancel
+      </Text>
+    </Pressable>
+  </View>
+)}  
         {tab === 'Requests' && (
           <View style={styles.requestsList}>
             {requests.map((request, index) => (
@@ -1073,5 +1113,54 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
     color: '#DC2626',
+  },
+    timePickerBox: {
+    marginTop: 16,
+    padding: 16,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: COLORS.card,
+  },
+
+  timePickerTitle: {
+    marginBottom: 14,
+    fontSize: 14,
+    fontWeight: '700',
+    color: COLORS.foreground,
+  },
+
+  timeOptionsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+
+  timeOption: {
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    borderRadius: 10,
+    backgroundColor: COLORS.muted,
+  },
+
+  timeOptionText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: COLORS.foreground,
+  },
+
+  cancelTimePicker: {
+    marginTop: 16,
+    alignItems: 'center',
+    paddingVertical: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+
+  cancelTimePickerText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: COLORS.primary,
   },
 });
