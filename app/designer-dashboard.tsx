@@ -2,12 +2,14 @@ import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { useState } from 'react';
 import {
-    Pressable,
-    ScrollView,
-    StyleSheet,
-    Text,
-    View,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
 } from 'react-native';
+
+import * as ImagePicker from 'expo-image-picker';
 
 const COLORS = {
   background: '#FDF5EF',
@@ -55,6 +57,19 @@ export default function DesignerDashboard() {
   const [tab, setTab] = useState('Overview');
   const [acceptedRequests, setAcceptedRequests] = useState<number[]>([]);
   const [declinedRequests, setDeclinedRequests] = useState<number[]>([]);
+  const pickImage = async () => {
+  const result = await ImagePicker.launchImageLibraryAsync({
+    mediaTypes: ['images'],
+    allowsMultipleSelection: true,
+    quality: 1,
+  });
+
+  if (!result.canceled) {
+  const newPhotos = result.assets.map((asset) => asset.uri);
+
+  setPortfolio((prev) => [...prev, ...newPhotos]);
+}
+};
   const [availableDays, setAvailableDays] = useState([
   'Monday',
   'Tuesday',
@@ -154,8 +169,9 @@ const [editingTime, setEditingTime] = useState<{
     },
   ];
 
-  const portfolio = Object.values(N).map((id) => img(id, 200, 200));
-
+const [portfolio, setPortfolio] = useState(
+  Object.values(N).map((id) => img(id, 200, 200))
+);
   const days = [
     'Monday',
     'Tuesday',
@@ -370,7 +386,7 @@ const [editingTime, setEditingTime] = useState<{
 
               <Pressable
   style={styles.addPhotosButton}
-  onPress={() => alert('Add Photos')}
+  onPress={pickImage}
 >
                 <Ionicons
                   name="add"
