@@ -663,11 +663,20 @@ useEffect(() => {
                     </Text>
                   </View>
 
-                  <View
-                    style={[
-                      styles.statusBadge,
-                     
-                    ]}
+                 <View
+  style={[
+    styles.statusBadge,
+
+    // Changes the badge background based on the current request status
+    acceptedRequests.includes(index)
+      ? styles.statusConfirmed
+      : declinedRequests.includes(index)
+      ? styles.statusDeclined
+      : request.status === 'confirmed'
+      ? styles.statusConfirmed
+      : styles.statusPending,
+  ]}
+
                   >
                    <Text
   style={[
@@ -1168,6 +1177,10 @@ const styles = StyleSheet.create({
   statusConfirmed: {
     backgroundColor: '#ECFDF5',
   },
+  // Light red background used when a booking request is declined
+statusDeclined: {
+  backgroundColor: '#FEECEC',
+},
 
   statusPending: {
     backgroundColor: COLORS.muted,
