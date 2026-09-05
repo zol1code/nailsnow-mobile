@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Pressable,
   ScrollView,
@@ -10,6 +10,8 @@ import {
 } from 'react-native';
 
 import * as ImagePicker from 'expo-image-picker';
+
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const COLORS = {
   background: '#FDF5EF',
@@ -67,7 +69,16 @@ export default function DesignerDashboard() {
   if (!result.canceled) {
   const newPhotos = result.assets.map((asset) => asset.uri);
 
-  setPortfolio((prev) => [...prev, ...newPhotos]);
+  setPortfolio((prev) => {
+  const updatedPortfolio = [...prev, ...newPhotos];
+
+  AsyncStorage.setItem(
+    'designerPortfolio',
+    JSON.stringify(updatedPortfolio)
+  );
+
+  return updatedPortfolio;
+});
 }
 };
   const [availableDays, setAvailableDays] = useState([
@@ -172,6 +183,20 @@ const [editingTime, setEditingTime] = useState<{
 const [portfolio, setPortfolio] = useState(
   Object.values(N).map((id) => img(id, 200, 200))
 );
+// Runs when the Designer Dashboard screen opens
+// Loads the portfolio photos previously saved on the device
+useEffect(() => {
+  const loadPortfolio = async () => {
+    const savedPortfolio = await AsyncStorage.getItem('designerPortfolio');
+ // If saved photos exist, convert them back into an array
+    // and display them in the portfolio
+    if (savedPortfolio) {
+      setPortfolio(JSON.parse(savedPortfolio));
+    }
+  };
+
+  loadPortfolio();
+}, []);
   const days = [
     'Monday',
     'Tuesday',
