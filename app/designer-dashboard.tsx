@@ -57,6 +57,8 @@ type BookingRequest = {
 
 export default function DesignerDashboard() {
   const [tab, setTab] = useState('Overview');
+  // Controls whether the notifications panel is visible
+const [showNotifications, setShowNotifications] = useState(false);
   const [acceptedRequests, setAcceptedRequests] = useState<number[]>([]);
   const [declinedRequests, setDeclinedRequests] = useState<number[]>([]);
   const pickImage = async () => {
@@ -224,8 +226,7 @@ useEffect(() => {
           <View style={styles.headerActions}>
             <Pressable
   style={styles.iconButton}
-  onPress={() => alert('No new notifications')}
->
+onPress={() => setShowNotifications((prev) => !prev)}>
               <Ionicons
                 name="notifications-outline"
                 size={18}
@@ -240,6 +241,50 @@ useEffect(() => {
             />
           </View>
         </View>
+        {/* Shows the notifications panel when the bell button is pressed */}
+{showNotifications && (
+  <View style={styles.notificationsPanel}>
+    <Text style={styles.notificationsTitle}>
+      Notifications
+    </Text>
+
+    <View style={styles.notificationItem}>
+      <Ionicons
+        name="calendar-outline"
+        size={18}
+        color={COLORS.primary}
+      />
+
+      <View style={styles.notificationTextContainer}>
+        <Text style={styles.notificationText}>
+          New booking request from Emma R.
+        </Text>
+
+        <Text style={styles.notificationTime}>
+          5 minutes ago
+        </Text>
+      </View>
+    </View>
+
+    <View style={styles.notificationItem}>
+      <Ionicons
+        name="checkmark-circle-outline"
+        size={18}
+        color={COLORS.primary}
+      />
+
+      <View style={styles.notificationTextContainer}>
+        <Text style={styles.notificationText}>
+          Mia D. confirmed her appointment.
+        </Text>
+
+        <Text style={styles.notificationTime}>
+          1 hour ago
+        </Text>
+      </View>
+    </View>
+  </View>
+)}
 
         <ScrollView
           horizontal
@@ -1204,4 +1249,52 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: COLORS.primary,
   },
+
+  // Container for the notifications dropdown panel
+notificationsPanel: {
+  marginHorizontal: 20,
+  marginTop: 12,
+  padding: 16,
+  borderRadius: 16,
+  borderWidth: 1,
+  borderColor: COLORS.border,
+  backgroundColor: COLORS.card,
+},
+
+// Title displayed at the top of the notifications panel
+notificationsTitle: {
+  marginBottom: 14,
+  fontSize: 14,
+  fontWeight: '700',
+  color: COLORS.foreground,
+},
+
+// Row for each individual notification
+notificationItem: {
+  flexDirection: 'row',
+  alignItems: 'flex-start',
+  gap: 10,
+  paddingVertical: 10,
+  borderBottomWidth: 1,
+  borderBottomColor: COLORS.border,
+},
+
+// Holds the notification message and timestamp
+notificationTextContainer: {
+  flex: 1,
+},
+
+// Main notification message
+notificationText: {
+  fontSize: 13,
+  fontWeight: '600',
+  color: COLORS.foreground,
+},
+
+// Small timestamp shown below the notification message
+notificationTime: {
+  marginTop: 3,
+  fontSize: 11,
+  color: COLORS.mutedForeground,
+},
 });
