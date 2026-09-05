@@ -666,22 +666,32 @@ useEffect(() => {
                   <View
                     style={[
                       styles.statusBadge,
-                      request.status === 'confirmed'
-                        ? styles.statusConfirmed
-                        : styles.statusPending,
+                     
                     ]}
                   >
-                    <Text
-                      style={[
-                        styles.statusText,
-                        request.status === 'confirmed'
-                          ? styles.statusTextConfirmed
-                          : styles.statusTextPending,
-                      ]}
+                   <Text
+  style={[
+    styles.statusText,
+
+    // Changes the status text color based on the designer's action
+    acceptedRequests.includes(index)
+      ? styles.statusTextConfirmed
+      : declinedRequests.includes(index)
+      ? styles.statusTextDeclined
+      : request.status === 'confirmed'
+      ? styles.statusTextConfirmed
+      : styles.statusTextPending,
+  ]}
+
                     >
-                      {request.status === 'confirmed'
-                        ? 'Confirmed'
-                        : 'Pending'}
+                      {/* Shows the current request status based on the designer's action */}
+{acceptedRequests.includes(index)
+  ? 'Accepted'
+  : declinedRequests.includes(index)
+  ? 'Declined'
+  : request.status === 'confirmed'
+  ? 'Confirmed'
+  : 'Pending'}
                     </Text>
                   </View>
                 </View>
@@ -1171,6 +1181,11 @@ const styles = StyleSheet.create({
   statusTextConfirmed: {
     color: '#047857',
   },
+
+  // Red text used when the designer declines a booking request
+statusTextDeclined: {
+  color: '#B42318',
+},
 
   statusTextPending: {
     color: COLORS.mutedForeground,
