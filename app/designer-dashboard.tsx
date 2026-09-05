@@ -181,6 +181,11 @@ const [editingTime, setEditingTime] = useState<{
       status: 'confirmed',
     },
   ];
+  // Creates the notification list automatically from pending booking requests.
+// This keeps the notification panel synchronized with the Requests section.
+const pendingRequests = requests.filter(
+  (request) => request.status === 'pending'
+);
 
 const [portfolio, setPortfolio] = useState(
   Object.values(N).map((id) => img(id, 200, 200))
@@ -226,13 +231,23 @@ useEffect(() => {
           <View style={styles.headerActions}>
             <Pressable
   style={styles.iconButton}
-onPress={() => setShowNotifications((prev) => !prev)}>
-              <Ionicons
-                name="notifications-outline"
-                size={18}
-                color={COLORS.foreground}
-              />
-            </Pressable>
+  onPress={() => setShowNotifications((prev) => !prev)}
+>
+  <Ionicons
+    name="notifications-outline"
+    size={18}
+    color={COLORS.foreground}
+  />
+
+  {/* Shows the number of pending booking requests on the notification bell */}
+  {pendingRequests.length > 0 && (
+    <View style={styles.notificationBadge}>
+      <Text style={styles.notificationBadgeText}>
+        {pendingRequests.length}
+      </Text>
+    </View>
+  )}
+</Pressable>
 
             <Image
               source={img(P.a1, 80, 80)}
@@ -248,41 +263,47 @@ onPress={() => setShowNotifications((prev) => !prev)}>
       Notifications
     </Text>
 
-    <View style={styles.notificationItem}>
-      <Ionicons
-        name="calendar-outline"
-        size={18}
-        color={COLORS.primary}
-      />
+    {/* Creates one notification for each pending booking request */}
+{pendingRequests.map((request, index) => (
+  <View
+    key={`${request.client}-${index}`}
+    style={styles.notificationItem}
+  >
+    <Ionicons
+      name="calendar-outline"
+      size={18}
+      color={COLORS.primary}
+    />
 
-      <View style={styles.notificationTextContainer}>
-        <Text style={styles.notificationText}>
-          New booking request from Emma R.
-        </Text>
+    <View style={styles.notificationTextContainer}>
+      <Text style={styles.notificationText}>
+        New booking request from {request.client}
+      </Text>
 
-        <Text style={styles.notificationTime}>
-          5 minutes ago
-        </Text>
-      </View>
+      <Text style={styles.notificationTime}>
+        {request.service} · {request.date}
+      </Text>
     </View>
+  </View>
+))}
 
     <View style={styles.notificationItem}>
-      <Ionicons
-        name="checkmark-circle-outline"
-        size={18}
-        color={COLORS.primary}
-      />
+  <Ionicons
+    name="checkmark-circle-outline"
+    size={18}
+    color={COLORS.primary}
+  />
 
-      <View style={styles.notificationTextContainer}>
-        <Text style={styles.notificationText}>
-          Mia D. confirmed her appointment.
-        </Text>
+  <View style={styles.notificationTextContainer}>
+    <Text style={styles.notificationText}>
+      Mia D. confirmed her appointment.
+    </Text>
 
-        <Text style={styles.notificationTime}>
-          1 hour ago
-        </Text>
-      </View>
-    </View>
+    <Text style={styles.notificationTime}>
+      1 hour ago
+    </Text>
+  </View>
+</View>
   </View>
 )}
 
@@ -1296,5 +1317,25 @@ notificationTime: {
   marginTop: 3,
   fontSize: 11,
   color: COLORS.mutedForeground,
+},
+// Small badge displayed on the notification bell
+notificationBadge: {
+  position: 'absolute',
+  top: -5,
+  right: -5,
+  minWidth: 18,
+  height: 18,
+  paddingHorizontal: 4,
+  borderRadius: 9,
+  alignItems: 'center',
+  justifyContent: 'center',
+  backgroundColor: COLORS.primary,
+},
+
+// Number displayed inside the notification badge
+notificationBadgeText: {
+  fontSize: 10,
+  fontWeight: '700',
+  color: '#FFFFFF',
 },
 });
