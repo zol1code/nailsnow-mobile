@@ -501,7 +501,10 @@ useEffect(() => {
                 />
               ))}
 
-              <Pressable style={styles.addPhotoTile}>
+              <Pressable
+  style={styles.addPhotoTile}
+  onPress={pickImage}
+>
                 <Ionicons
                   name="add"
                   size={26}
