@@ -1,11 +1,16 @@
 import { Ionicons } from '@expo/vector-icons';
+// Stores appointments locally so they remain available after closing the app
+import AsyncStorage from '@react-native-async-storage/async-storage';
+// Stores appointments locally so they remain available after closing the app
 import { Image } from 'expo-image';
 import { router, useLocalSearchParams } from 'expo-router';
+// React hooks used to store and restore appointment data
+import { useEffect, useState } from 'react';
 import {
-    Pressable,
-    StyleSheet,
-    Text,
-    View,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
 } from 'react-native';
 
 const COLORS = {
@@ -60,12 +65,81 @@ const DESIGNERS = [
 
 export default function AppointmentsScreen() {
   const params = useLocalSearchParams();
+// Stores appointment data loaded from the device.
+// It will be used when the screen is opened without route parameters.
+const [savedAppointment, setSavedAppointment] = useState<{
+  designerId: number;
+  service: string;
+  date: string;
+  time: string;
+} | null>(null);
+// Loads a previously saved appointment when this screen opens.
+// This allows the appointment to remain available after closing the app.
+useEffect(() => {
+  const loadSavedAppointment = async () => {
+    const storedAppointment = await AsyncStorage.getItem(
+      'customerAppointment'
+    );
 
-  const designerId = Number(params.id ?? 0);
-  const service = String(params.service ?? '');
-  const date = String(params.date ?? '');
-  const time = String(params.time ?? '');
+    // Restores the saved appointment if one exists on the device
+    if (storedAppointment) {
+      setSavedAppointment(JSON.parse(storedAppointment));
+    }
+  };
 
+  loadSavedAppointment();
+}, []);
+// Uses route parameters when available.
+// If the screen is opened directly, it falls back to the saved appointment.
+const designerId = Number(
+  params.id ?? savedAppointment?.designerId ?? 0
+);
+
+const service = String(
+  params.service ?? savedAppointment?.service ?? ''
+);
+
+const date = String(
+  params.date ?? savedAppointment?.date ?? ''
+);
+
+const time = String(
+  params.time ?? savedAppointment?.time ?? ''
+);
+// Saves a new appointment when this screen receives booking data by route.
+// This allows the appointment to remain available after closing the app.
+useEffect(() => {
+  const saveAppointment = async () => {
+    const routeDesignerId = Number(params.id ?? 0);
+    const routeService = String(params.service ?? '');
+    const routeDate = String(params.date ?? '');
+    const routeTime = String(params.time ?? '');
+
+    // Only saves when a complete appointment was received
+    if (
+      routeDesignerId &&
+      routeService &&
+      routeDate &&
+      routeTime
+    ) {
+      const appointmentToSave = {
+        designerId: routeDesignerId,
+        service: routeService,
+        date: routeDate,
+        time: routeTime,
+      };
+
+      await AsyncStorage.setItem(
+        'customerAppointment',
+        JSON.stringify(appointmentToSave)
+      );
+
+      setSavedAppointment(appointmentToSave);
+    }
+  };
+
+  saveAppointment();
+}, [params.id, params.service, params.date, params.time]);
   const designer =
   DESIGNERS.find((item) => item.id === designerId) ?? DESIGNERS[0];
 
@@ -190,11 +264,20 @@ export default function AppointmentsScreen() {
                 </Text>
               </Pressable>
 
-              <Pressable style={styles.cancelButton}>
-                <Text style={styles.cancelButtonText}>
-                  Cancel
-                </Text>
-              </Pressable>
+              <Pressable
+  style={styles.cancelButton}
+  onPress={async () => {
+    // Removes the saved appointment from the device
+    await AsyncStorage.removeItem('customerAppointment');
+
+    // Removes the appointment from the screen immediately
+    setSavedAppointment(null);
+  }}
+>
+  <Text style={styles.cancelButtonText}>
+    Cancel
+  </Text>
+</Pressable>
             </View>
           </View>
         )}

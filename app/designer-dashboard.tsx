@@ -61,6 +61,31 @@ export default function DesignerDashboard() {
 const [showNotifications, setShowNotifications] = useState(false);
   const [acceptedRequests, setAcceptedRequests] = useState<number[]>([]);
   const [declinedRequests, setDeclinedRequests] = useState<number[]>([]);
+  // Loads the saved booking request actions when the dashboard opens.
+// This keeps accepted and declined requests after the app is closed.
+useEffect(() => {
+  const loadRequestActions = async () => {
+    const savedAcceptedRequests = await AsyncStorage.getItem(
+      'acceptedRequests'
+    );
+
+    const savedDeclinedRequests = await AsyncStorage.getItem(
+      'declinedRequests'
+    );
+
+    // Restores previously accepted booking requests
+    if (savedAcceptedRequests) {
+      setAcceptedRequests(JSON.parse(savedAcceptedRequests));
+    }
+
+    // Restores previously declined booking requests
+    if (savedDeclinedRequests) {
+      setDeclinedRequests(JSON.parse(savedDeclinedRequests));
+    }
+  };
+
+  loadRequestActions();
+}, []);
   const pickImage = async () => {
   const result = await ImagePicker.launchImageLibraryAsync({
     mediaTypes: ['images'],
@@ -101,6 +126,32 @@ const [scheduleTimes, setScheduleTimes] = useState({
   Saturday: { start: '9:00 AM', end: '6:00 PM' },
   Sunday: { start: '9:00 AM', end: '6:00 PM' },
 });
+
+// Loads the saved designer schedule when the dashboard opens.
+// This keeps availability and custom times after the app is closed.
+useEffect(() => {
+  const loadSchedule = async () => {
+    const savedAvailableDays = await AsyncStorage.getItem(
+      'designerAvailableDays'
+    );
+
+    const savedScheduleTimes = await AsyncStorage.getItem(
+      'designerScheduleTimes'
+    );
+
+    // Restores the days the designer marked as available
+    if (savedAvailableDays) {
+      setAvailableDays(JSON.parse(savedAvailableDays));
+    }
+
+    // Restores the custom opening and closing times
+    if (savedScheduleTimes) {
+      setScheduleTimes(JSON.parse(savedScheduleTimes));
+    }
+  };
+
+  loadSchedule();
+}, []);
 
 const timeOptions = [
   '7:00 AM',
@@ -578,13 +629,22 @@ useEffect(() => {
                   )}
 
                  <Pressable
-  onPress={() => {
-    setAvailableDays((prev) =>
-      prev.includes(day)
-        ? prev.filter((item) => item !== day)
-        : [...prev, day]
+ onPress={() => {
+  setAvailableDays((prev) => {
+    const updatedAvailableDays = prev.includes(day)
+      ? prev.filter((item) => item !== day)
+      : [...prev, day];
+
+    // Saves the updated availability locally on the device
+    // so the selected days remain after closing the app
+    AsyncStorage.setItem(
+      'designerAvailableDays',
+      JSON.stringify(updatedAvailableDays)
     );
-  }}
+
+    return updatedAvailableDays;
+  });
+}}
   style={[
     styles.switchTrack,
     available && styles.switchTrackOn,
@@ -616,13 +676,24 @@ useEffect(() => {
           onPress={() => {
             const dayKey = editingTime.day as keyof typeof scheduleTimes;
 
-            setScheduleTimes((prev) => ({
-              ...prev,
-              [dayKey]: {
-                ...prev[dayKey],
-                [editingTime.type]: time,
-              },
-            }));
+            setScheduleTimes((prev) => {
+  const updatedScheduleTimes = {
+    ...prev,
+    [dayKey]: {
+      ...prev[dayKey],
+      [editingTime.type]: time,
+    },
+  };
+
+  // Saves the updated schedule times locally on the device
+  // so custom opening and closing times remain after closing the app
+  AsyncStorage.setItem(
+    'designerScheduleTimes',
+    JSON.stringify(updatedScheduleTimes)
+  );
+
+  return updatedScheduleTimes;
+});
 
             setEditingTime(null);
           }}
@@ -726,14 +797,34 @@ useEffect(() => {
                   <View style={styles.requestButtons}>
                     <Pressable
   style={styles.acceptButton}
- onPress={() => {
-  setAcceptedRequests((prev) =>
-    prev.includes(index) ? prev : [...prev, index]
-  );
+onPress={() => {
+  setAcceptedRequests((prev) => {
+    const updatedAccepted = prev.includes(index)
+      ? prev
+      : [...prev, index];
 
-  setDeclinedRequests((prev) =>
-    prev.filter((item) => item !== index)
-  );
+    // Saves accepted requests locally on the device
+    AsyncStorage.setItem(
+      'acceptedRequests',
+      JSON.stringify(updatedAccepted)
+    );
+
+    return updatedAccepted;
+  });
+
+  setDeclinedRequests((prev) => {
+    const updatedDeclined = prev.filter(
+      (item) => item !== index
+    );
+
+    // Removes this request from the declined list if needed
+    AsyncStorage.setItem(
+      'declinedRequests',
+      JSON.stringify(updatedDeclined)
+    );
+
+    return updatedDeclined;
+  });
 }}
 >
   <Text style={styles.acceptButtonText}>
@@ -744,14 +835,34 @@ useEffect(() => {
   <Pressable
   style={styles.declineButton}
   onPress={() => {
-    setDeclinedRequests((prev) =>
-      prev.includes(index) ? prev : [...prev, index]
+  setDeclinedRequests((prev) => {
+    const updatedDeclined = prev.includes(index)
+      ? prev
+      : [...prev, index];
+
+    // Saves declined requests locally on the device
+    AsyncStorage.setItem(
+      'declinedRequests',
+      JSON.stringify(updatedDeclined)
     );
 
-    setAcceptedRequests((prev) =>
-      prev.filter((item) => item !== index)
+    return updatedDeclined;
+  });
+
+  setAcceptedRequests((prev) => {
+    const updatedAccepted = prev.filter(
+      (item) => item !== index
     );
-  }}
+
+    // Removes this request from the accepted list if needed
+    AsyncStorage.setItem(
+      'acceptedRequests',
+      JSON.stringify(updatedAccepted)
+    );
+
+    return updatedAccepted;
+  });
+}}
 >
   <Text style={styles.declineButtonText}>
     {declinedRequests.includes(index) ? 'Declined' : 'Decline'}
