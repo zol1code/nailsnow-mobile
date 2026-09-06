@@ -183,8 +183,13 @@ const [editingTime, setEditingTime] = useState<{
   ];
   // Creates the notification list automatically from pending booking requests.
 // This keeps the notification panel synchronized with the Requests section.
+// Creates notifications only for booking requests that are still pending.
+// Accepted or declined requests are removed from the notification list.
 const pendingRequests = requests.filter(
-  (request) => request.status === 'pending'
+  (request, index) =>
+    request.status === 'pending' &&
+    !acceptedRequests.includes(index) &&
+    !declinedRequests.includes(index)
 );
 
 const [portfolio, setPortfolio] = useState(
