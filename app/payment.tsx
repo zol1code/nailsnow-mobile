@@ -3,12 +3,12 @@ import { Image } from 'expo-image';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
 import {
-    Pressable,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    View,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
 } from 'react-native';
 
 const COLORS = {
@@ -71,6 +71,8 @@ export default function PaymentScreen() {
 
   const service = String(params.service ?? '');
   const price = Number(params.price ?? 0);
+  // Receives the service duration from the booking screen
+const duration = Number(params.duration ?? 0);
   const date = String(params.date ?? '');
   const time = String(params.time ?? '');
 
@@ -106,6 +108,8 @@ export default function PaymentScreen() {
         id: designer.id.toString(),
         service,
         price: price.toString(),
+        // Passes the service duration to the confirmation screen
+duration: duration.toString(),
         date,
         time,
       },

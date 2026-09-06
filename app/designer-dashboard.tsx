@@ -48,6 +48,8 @@ const N = {
 type RequestStatus = 'pending' | 'confirmed';
 
 type BookingRequest = {
+  // Unique ID used to track this request safely
+  id: string;
   client: string;
   service: string;
   date: string;
@@ -59,8 +61,10 @@ export default function DesignerDashboard() {
   const [tab, setTab] = useState('Overview');
   // Controls whether the notifications panel is visible
 const [showNotifications, setShowNotifications] = useState(false);
-  const [acceptedRequests, setAcceptedRequests] = useState<number[]>([]);
-  const [declinedRequests, setDeclinedRequests] = useState<number[]>([]);
+// Stores unique request IDs instead of array positions.
+// This prevents the wrong booking from changing status when the list order changes.
+const [acceptedRequests, setAcceptedRequests] = useState<string[]>([]);
+const [declinedRequests, setDeclinedRequests] = useState<string[]>([]);
   // Loads the saved booking request actions when the dashboard opens.
 // This keeps accepted and declined requests after the app is closed.
 useEffect(() => {
@@ -209,38 +213,91 @@ const [editingTime, setEditingTime] = useState<{
     },
   ];
 
-  const requests: BookingRequest[] = [
-    {
-      client: 'Emma R.',
-      service: 'Gel Extensions',
-      date: 'Thu Aug 28 · 2:00 PM',
-      avatar: img(P.a3, 60, 60),
-      status: 'pending',
-    },
-    {
-      client: 'Mia D.',
-      service: 'Nail Art Design',
-      date: 'Fri Aug 29 · 11:00 AM',
-      avatar: img(P.a4, 60, 60),
-      status: 'pending',
-    },
-    {
-      client: 'Zoe T.',
-      service: 'Classic Manicure',
-      date: 'Mon Sep 1 · 3:00 PM',
-      avatar: img(P.a5, 60, 60),
-      status: 'confirmed',
-    },
-  ];
+ const [requests, setRequests] = useState<BookingRequest[]>([
+  {
+    // Unique ID for this booking request
+    id: 'emma-aug28-2pm',
+
+    client: 'Emma R.',
+    service: 'Gel Extensions',
+    date: 'Thu Aug 28 · 2:00 PM',
+    avatar: img(P.a3, 60, 60),
+    status: 'pending',
+  },
+
+  {
+    // Unique ID for this booking request
+    id: 'mia-aug29-11am',
+
+    client: 'Mia D.',
+    service: 'Nail Art Design',
+    date: 'Fri Aug 29 · 11:00 AM',
+    avatar: img(P.a4, 60, 60),
+    status: 'pending',
+  },
+
+  {
+    // Unique ID for this booking request
+    id: 'zoe-sep1-3pm',
+
+    client: 'Zoe T.',
+    service: 'Classic Manicure',
+    date: 'Mon Sep 1 · 3:00 PM',
+    avatar: img(P.a5, 60, 60),
+    status: 'confirmed',
+  },
+]);
+  // Loads the customer's saved appointment and turns it into a designer request.
+// This connects the customer booking flow with the designer dashboard locally.
+useEffect(() => {
+  const loadCustomerAppointment = async () => {
+    const savedAppointment = await AsyncStorage.getItem(
+      'customerAppointment'
+    );
+
+    if (savedAppointment) {
+      const appointment = JSON.parse(savedAppointment);
+
+      const newRequest: BookingRequest = {
+        // Creates a stable unique ID for this customer booking
+id: `customer-${appointment.designerId}-${appointment.date}-${appointment.time}`,
+        client: 'Customer',
+        service: appointment.service,
+        date: `${appointment.date} · ${appointment.time}`,
+        avatar: img(P.a1, 60, 60),
+        status: 'pending',
+      };
+
+      setRequests((prev) => {
+        const alreadyExists = prev.some(
+          (request) =>
+            request.service === newRequest.service &&
+            request.date === newRequest.date
+        );
+
+        // Prevents the same booking from being added more than once
+        if (alreadyExists) {
+          return prev;
+        }
+
+        return [newRequest, ...prev];
+      });
+    }
+  };
+
+  loadCustomerAppointment();
+}, []);
   // Creates the notification list automatically from pending booking requests.
 // This keeps the notification panel synchronized with the Requests section.
 // Creates notifications only for booking requests that are still pending.
 // Accepted or declined requests are removed from the notification list.
+// Keeps only requests that are still pending.
+// Uses the request ID instead of the array position so the status stays correct.
 const pendingRequests = requests.filter(
-  (request, index) =>
+  (request) =>
     request.status === 'pending' &&
-    !acceptedRequests.includes(index) &&
-    !declinedRequests.includes(index)
+    !acceptedRequests.includes(request.id) &&
+    !declinedRequests.includes(request.id)
 );
 
 const [portfolio, setPortfolio] = useState(
@@ -744,9 +801,9 @@ useEffect(() => {
     styles.statusBadge,
 
     // Changes the badge background based on the current request status
-    acceptedRequests.includes(index)
-      ? styles.statusConfirmed
-      : declinedRequests.includes(index)
+    acceptedRequests.includes(request.id)
+  ? styles.statusConfirmed
+  : declinedRequests.includes(request.id)
       ? styles.statusDeclined
       : request.status === 'confirmed'
       ? styles.statusConfirmed
@@ -759,9 +816,9 @@ useEffect(() => {
     styles.statusText,
 
     // Changes the status text color based on the designer's action
-    acceptedRequests.includes(index)
+    acceptedRequests.includes(request.id)
       ? styles.statusTextConfirmed
-      : declinedRequests.includes(index)
+      : declinedRequests.includes(request.id)
       ? styles.statusTextDeclined
       : request.status === 'confirmed'
       ? styles.statusTextConfirmed
@@ -770,9 +827,9 @@ useEffect(() => {
 
                     >
                       {/* Shows the current request status based on the designer's action */}
-{acceptedRequests.includes(index)
+{acceptedRequests.includes(request.id)
   ? 'Accepted'
-  : declinedRequests.includes(index)
+  : declinedRequests.includes(request.id)
   ? 'Declined'
   : request.status === 'confirmed'
   ? 'Confirmed'
@@ -798,10 +855,10 @@ useEffect(() => {
                     <Pressable
   style={styles.acceptButton}
 onPress={() => {
-  setAcceptedRequests((prev) => {
-    const updatedAccepted = prev.includes(index)
-      ? prev
-      : [...prev, index];
+setAcceptedRequests((prev) => {
+  const updatedAccepted = prev.includes(request.id)
+    ? prev
+      : [...prev, request.id];
 
     // Saves accepted requests locally on the device
     AsyncStorage.setItem(
@@ -813,9 +870,9 @@ onPress={() => {
   });
 
   setDeclinedRequests((prev) => {
-    const updatedDeclined = prev.filter(
-      (item) => item !== index
-    );
+  const updatedDeclined = prev.filter(
+    (item) => item !== request.id
+  );
 
     // Removes this request from the declined list if needed
     AsyncStorage.setItem(
@@ -827,18 +884,18 @@ onPress={() => {
   });
 }}
 >
-  <Text style={styles.acceptButtonText}>
-    {acceptedRequests.includes(index) ? 'Accepted' : 'Accept'}
-  </Text>
+<Text style={styles.acceptButtonText}>
+  {acceptedRequests.includes(request.id) ? 'Accepted' : 'Accept'}
+</Text>
 </Pressable>
 
-  <Pressable
+<Pressable
   style={styles.declineButton}
   onPress={() => {
-  setDeclinedRequests((prev) => {
-    const updatedDeclined = prev.includes(index)
-      ? prev
-      : [...prev, index];
+    setDeclinedRequests((prev) => {
+      const updatedDeclined = prev.includes(request.id)
+        ? prev
+        : [...prev, request.id];
 
     // Saves declined requests locally on the device
     AsyncStorage.setItem(
@@ -849,23 +906,23 @@ onPress={() => {
     return updatedDeclined;
   });
 
-  setAcceptedRequests((prev) => {
-    const updatedAccepted = prev.filter(
-      (item) => item !== index
-    );
+setAcceptedRequests((prev) => {
+  const updatedAccepted = prev.filter(
+    (item) => item !== request.id
+  );
 
-    // Removes this request from the accepted list if needed
-    AsyncStorage.setItem(
-      'acceptedRequests',
-      JSON.stringify(updatedAccepted)
-    );
+  // Removes this request from the accepted list if needed
+  AsyncStorage.setItem(
+    'acceptedRequests',
+    JSON.stringify(updatedAccepted)
+  );
 
-    return updatedAccepted;
-  });
+  return updatedAccepted;
+});
 }}
 >
   <Text style={styles.declineButtonText}>
-    {declinedRequests.includes(index) ? 'Declined' : 'Decline'}
+    {declinedRequests.includes(request.id) ? 'Declined' : 'Decline'}
   </Text>
 </Pressable>
                   </View>

@@ -2,10 +2,10 @@ import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { router, useLocalSearchParams } from 'expo-router';
 import {
-    Pressable,
-    StyleSheet,
-    Text,
-    View,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
 } from 'react-native';
 
 const COLORS = {
@@ -71,6 +71,8 @@ export default function ConfirmedScreen() {
 
   const service = String(params.service ?? '');
   const price = Number(params.price ?? 0);
+  // Receives the service duration from the payment screen
+const duration = Number(params.duration ?? 0);
   const date = String(params.date ?? '');
   const time = String(params.time ?? '');
 
@@ -142,8 +144,8 @@ export default function ConfirmedScreen() {
             </Text>
 
             <Text style={styles.detailValue}>
-              —
-            </Text>
+  {duration ? `${duration} min` : '—'}
+</Text>
           </View>
 
           <View style={styles.totalRow}>

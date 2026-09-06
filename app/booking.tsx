@@ -2,11 +2,11 @@ import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
 import {
-    Pressable,
-    ScrollView,
-    StyleSheet,
-    Text,
-    View,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
 } from 'react-native';
 
 const COLORS = {
@@ -128,6 +128,8 @@ export default function BookingScreen() {
         id: designer.id.toString(),
         service: service.name,
         price: service.price.toString(),
+        // Passes the service duration to the payment and confirmation flow
+duration: service.duration.toString(),
         date,
         time,
       },
