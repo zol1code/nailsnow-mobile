@@ -866,6 +866,24 @@ setAcceptedRequests((prev) => {
       JSON.stringify(updatedAccepted)
     );
 
+    // Updates the customer's saved appointment when this is a real customer request.
+// This allows the customer side to see that the booking was accepted.
+if (request.id.startsWith('customer-')) {
+  AsyncStorage.getItem('customerAppointment').then((savedAppointment) => {
+    if (savedAppointment) {
+      const appointment = JSON.parse(savedAppointment);
+
+      AsyncStorage.setItem(
+        'customerAppointment',
+        JSON.stringify({
+          ...appointment,
+          status: 'accepted',
+        })
+      );
+    }
+  });
+}
+
     return updatedAccepted;
   });
 
@@ -879,6 +897,23 @@ setAcceptedRequests((prev) => {
       'declinedRequests',
       JSON.stringify(updatedDeclined)
     );
+    // Updates the customer's saved appointment when this is a real customer request.
+// This allows the customer side to see that the booking was declined.
+if (request.id.startsWith('customer-')) {
+  AsyncStorage.getItem('customerAppointment').then((savedAppointment) => {
+    if (savedAppointment) {
+      const appointment = JSON.parse(savedAppointment);
+
+      AsyncStorage.setItem(
+        'customerAppointment',
+        JSON.stringify({
+          ...appointment,
+          status: 'declined',
+        })
+      );
+    }
+  });
+}
 
     return updatedDeclined;
   });

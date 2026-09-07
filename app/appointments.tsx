@@ -72,6 +72,8 @@ const [savedAppointment, setSavedAppointment] = useState<{
   service: string;
   date: string;
   time: string;
+  // Stores the current booking status set by the designer
+status?: 'pending' | 'accepted' | 'declined';
 } | null>(null);
 // Loads a previously saved appointment when this screen opens.
 // This allows the appointment to remain available after closing the app.
@@ -106,6 +108,13 @@ const date = String(
 const time = String(
   params.time ?? savedAppointment?.time ?? ''
 );
+
+// Uses the status saved by the designer.
+// New bookings default to pending until the designer responds.
+const appointmentStatus = savedAppointment?.status ?? 'pending';
+
+
+
 // Saves a new appointment when this screen receives booking data by route.
 // This allows the appointment to remain available after closing the app.
 useEffect(() => {
@@ -194,12 +203,49 @@ useEffect(() => {
         ) : (
           <View style={styles.card}>
             <View style={styles.statusRow}>
-              <View style={styles.confirmedBadge}>
-                <View style={styles.statusDot} />
+              <View
+  style={[
+    styles.confirmedBadge,
 
-                <Text style={styles.confirmedText}>
-                  Confirmed
-                </Text>
+    // Changes the badge background based on the appointment status
+    appointmentStatus === 'declined'
+      ? styles.declinedBadge
+      : appointmentStatus === 'accepted'
+      ? styles.acceptedBadge
+      : styles.pendingBadge,
+  ]}
+>
+                <View
+  style={[
+    styles.statusDot,
+
+    // Changes the status dot color based on the appointment status
+    appointmentStatus === 'declined'
+      ? styles.declinedDot
+      : appointmentStatus === 'accepted'
+      ? styles.acceptedDot
+      : styles.pendingDot,
+  ]}
+/>
+
+                <Text
+  style={[
+    styles.confirmedText,
+
+    // Changes the status text color based on the appointment status
+    appointmentStatus === 'declined'
+      ? styles.declinedText
+      : appointmentStatus === 'accepted'
+      ? styles.acceptedText
+      : styles.pendingText,
+  ]}
+>
+  {appointmentStatus === 'accepted'
+    ? 'Accepted'
+    : appointmentStatus === 'declined'
+    ? 'Declined'
+    : 'Pending'}
+</Text>
               </View>
 
               <Text style={styles.upcoming}>
@@ -384,6 +430,20 @@ const styles = StyleSheet.create({
     backgroundColor: '#ECFDF5',
   },
 
+  // Green background used when the designer accepts the appointment
+acceptedBadge: {
+  backgroundColor: '#ECFDF5',
+},
+
+// Soft background used while the appointment is waiting for a response
+pendingBadge: {
+  backgroundColor: COLORS.muted,
+},
+
+// Light red background used when the designer declines the appointment
+declinedBadge: {
+  backgroundColor: '#FEECEC',
+},
   statusDot: {
     width: 6,
     height: 6,
@@ -391,11 +451,41 @@ const styles = StyleSheet.create({
     backgroundColor: '#10B981',
   },
 
+  // Green dot used when the appointment is accepted
+acceptedDot: {
+  backgroundColor: '#10B981',
+},
+
+// Neutral dot used while the appointment is waiting for a response
+pendingDot: {
+  backgroundColor: COLORS.mutedForeground,
+},
+
+// Red dot used when the appointment is declined
+declinedDot: {
+  backgroundColor: '#B42318',
+},
+
   confirmedText: {
     fontSize: 12,
     fontWeight: '600',
     color: '#047857',
   },
+
+  // Green text used when the appointment is accepted
+acceptedText: {
+  color: '#047857',
+},
+
+// Neutral text used while the appointment is waiting for a response
+pendingText: {
+  color: COLORS.mutedForeground,
+},
+
+// Red text used when the appointment is declined
+declinedText: {
+  color: '#B42318',
+},
 
   upcoming: {
     fontSize: 12,
