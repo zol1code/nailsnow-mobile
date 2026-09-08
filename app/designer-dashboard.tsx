@@ -865,6 +865,14 @@ setAcceptedRequests((prev) => {
       'acceptedRequests',
       JSON.stringify(updatedAccepted)
     );
+    // Saves the customer appointment status when the designer accepts it.
+// This allows the customer side to know that the booking was accepted.
+if (request.id.startsWith('customer-')) {
+  AsyncStorage.setItem(
+    'customerAppointmentStatus',
+    'accepted'
+  );
+}
 
     return updatedAccepted;
   });
@@ -902,6 +910,14 @@ setAcceptedRequests((prev) => {
       'declinedRequests',
       JSON.stringify(updatedDeclined)
     );
+    // Saves the customer appointment status when the designer declines it.
+// This allows the customer side to know that the booking was declined.
+if (request.id.startsWith('customer-')) {
+  AsyncStorage.setItem(
+    'customerAppointmentStatus',
+    'declined'
+  );
+}
 
     return updatedDeclined;
   });

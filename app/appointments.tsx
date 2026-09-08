@@ -8,6 +8,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
 import {
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   View,
@@ -62,32 +63,89 @@ const DESIGNERS = [
     avatar: img(P.a5),
   },
 ];
-
-export default function AppointmentsScreen() {
-  const params = useLocalSearchParams();
-// Stores appointment data loaded from the device.
-// It will be used when the screen is opened without route parameters.
-const [savedAppointment, setSavedAppointment] = useState<{
+// Represents one customer booking stored in the app.
+// This type will also be used when supporting multiple appointments.
+type CustomerAppointment = {
   designerId: number;
   service: string;
   date: string;
   time: string;
-} | null>(null);
+};
+export default function AppointmentsScreen() {
+  const params = useLocalSearchParams();
+// Stores appointment data loaded from the device.
+// It will be used when the screen is opened without route parameters.
+// Stores one appointment loaded from the device
+const [savedAppointment, setSavedAppointment] =
+  useState<CustomerAppointment | null>(null);
+// Stores all customer appointments.
+// This will replace the single savedAppointment flow gradually.
+const [appointments, setAppointments] = useState<CustomerAppointment[]>([]);  
+
+// Stores the current booking status set by the designer
+const [appointmentStatus, setAppointmentStatus] = useState<
+  'pending' | 'accepted' | 'declined'
+>('pending');
+
 // Loads a previously saved appointment when this screen opens.
 // This allows the appointment to remain available after closing the app.
-useEffect(() => {
+
+ useEffect(() => {
   const loadSavedAppointment = async () => {
+    // Loads the old single appointment from the device
     const storedAppointment = await AsyncStorage.getItem(
       'customerAppointment'
     );
 
-    // Restores the saved appointment if one exists on the device
+    // Loads the new list containing all customer appointments
+    const storedAppointments = await AsyncStorage.getItem(
+      'customerAppointments'
+    );
+
+    // If the new appointments list already exists,
+    // restore all appointments from it.
+    if (storedAppointments) {
+      const parsedAppointments: CustomerAppointment[] =
+        JSON.parse(storedAppointments);
+
+      setAppointments(parsedAppointments);
+    }
+
+    // Restores the old single appointment.
+    // We still keep this temporarily for compatibility with the current flow.
     if (storedAppointment) {
-      setSavedAppointment(JSON.parse(storedAppointment));
+      const parsedAppointment: CustomerAppointment =
+        JSON.parse(storedAppointment);
+
+      setSavedAppointment(parsedAppointment);
+
+      // If the new list does not exist yet,
+      // use the old appointment as the first item in the list.
+      if (!storedAppointments) {
+        setAppointments([parsedAppointment]);
+      }
     }
   };
 
   loadSavedAppointment();
+}, []);
+// Loads the current appointment status saved by the designer
+useEffect(() => {
+  const loadAppointmentStatus = async () => {
+    const savedStatus = await AsyncStorage.getItem(
+      'customerAppointmentStatus'
+    );
+
+    // Restores the booking status if one was previously saved
+    if (
+      savedStatus === 'accepted' ||
+      savedStatus === 'declined'
+    ) {
+      setAppointmentStatus(savedStatus);
+    }
+  };
+
+  loadAppointmentStatus();
 }, []);
 // Uses route parameters when available.
 // If the screen is opened directly, it falls back to the saved appointment.
@@ -129,23 +187,73 @@ useEffect(() => {
         time: routeTime,
       };
 
-      await AsyncStorage.setItem(
-        'customerAppointment',
-        JSON.stringify(appointmentToSave)
-      );
+      // Saves the newest appointment in the old storage key.
+// We keep this temporarily so the current app flow continues working.
+await AsyncStorage.setItem(
+  'customerAppointment',
+  JSON.stringify(appointmentToSave)
+);
 
-      setSavedAppointment(appointmentToSave);
+// Adds the new appointment to the appointments list
+// instead of replacing the previous appointment.
+setAppointments((prev) => {
+  const updatedAppointments = [...prev, appointmentToSave];
+
+  // Saves all appointments locally on the device.
+  AsyncStorage.setItem(
+    'customerAppointments',
+    JSON.stringify(updatedAppointments)
+  );
+
+  return updatedAppointments;
+});
+
+// Keeps the old single-appointment state working for now
+setSavedAppointment(appointmentToSave);
     }
   };
 
   saveAppointment();
 }, [params.id, params.service, params.date, params.time]);
-  const designer =
-  DESIGNERS.find((item) => item.id === designerId) ?? DESIGNERS[0];
 
-  const hasAppointment =
+
+ // Checks whether the customer has at least one appointment.
+// It supports both the old single-booking flow and the new appointments list.
+const hasAppointment =
+  appointments.length > 0 ||
   Boolean(designerId && service && date && time);
 
+  // Uses the first appointment from the new list when available.
+// Falls back to the old single-appointment flow while the migration is in progress.
+const activeAppointment =
+  appointments[0] ??
+  (hasAppointment
+    ? {
+        designerId,
+        service,
+        date,
+        time,
+      }
+    : null);
+
+    // Finds the designer connected to the appointment currently shown
+const designer =
+  DESIGNERS.find(
+    (item) =>
+      item.id ===
+      (activeAppointment?.designerId ?? designerId)
+  ) ?? DESIGNERS[0];
+// Finds the correct nail artist for each appointment.
+// This will be used when multiple appointment cards are displayed.
+const getDesignerForAppointment = (
+  appointment: CustomerAppointment
+) => {
+  return (
+    DESIGNERS.find(
+      (item) => item.id === appointment.designerId
+    ) ?? DESIGNERS[0]
+  );
+};
   return (
     <View style={styles.container}>
       <View style={styles.header}>
@@ -165,7 +273,11 @@ useEffect(() => {
         </Text>
       </View>
 
-      <View style={styles.content}>
+      <ScrollView
+  style={styles.content}
+  contentContainerStyle={{ paddingBottom: 40 }}
+  showsVerticalScrollIndicator={false}
+>
         {!hasAppointment ? (
           <View style={styles.emptyState}>
             <Ionicons
@@ -192,96 +304,130 @@ useEffect(() => {
             </Pressable>
           </View>
         ) : (
-          <View style={styles.card}>
-            <View style={styles.statusRow}>
-              <View style={styles.confirmedBadge}>
-                <View style={styles.statusDot} />
+         <>
+  {appointments.map((appointment, index) => {
+    // Finds the correct nail artist for this specific appointment
+    const appointmentDesigner =
+      getDesignerForAppointment(appointment);
 
-                <Text style={styles.confirmedText}>
-                  Confirmed
-                </Text>
-              </View>
+    return (
+      <View
+        key={`${appointment.designerId}-${appointment.date}-${appointment.time}-${index}`}
+        style={styles.card}
+      >
+        <View style={styles.statusRow}>
+          <View style={styles.confirmedBadge}>
+            <View style={styles.statusDot} />
 
-              <Text style={styles.upcoming}>
-                Upcoming
-              </Text>
-            </View>
-
-            <View style={styles.designerRow}>
-              <Image
-                source={designer.avatar}
-                style={styles.avatar}
-                contentFit="cover"
-              />
-
-              <View>
-                <Text style={styles.designerName}>
-                  {designer.name}
-                </Text>
-
-                <Text style={styles.serviceName}>
-                  {service}
-                </Text>
-              </View>
-            </View>
-
-            <View style={styles.dateTimeRow}>
-              <View style={styles.infoBox}>
-                <Text style={styles.infoLabel}>
-                  Date
-                </Text>
-
-                <Text style={styles.infoValue}>
-                  {date}
-                </Text>
-              </View>
-
-              <View style={styles.infoBox}>
-                <Text style={styles.infoLabel}>
-                  Time
-                </Text>
-
-                <Text style={styles.infoValue}>
-                  {time}
-                </Text>
-              </View>
-            </View>
-
-            <View style={styles.actions}>
-              <Pressable
-                style={styles.chatButton}
-                onPress={() =>
-                  router.push({
-                    pathname: '/chat',
-                    params: {
-                      id: designer.id.toString(),
-                    },
-                  })
-                }
-              >
-                <Text style={styles.chatButtonText}>
-                  Chat with Artist
-                </Text>
-              </Pressable>
-
-              <Pressable
-  style={styles.cancelButton}
-  onPress={async () => {
-    // Removes the saved appointment from the device
-    await AsyncStorage.removeItem('customerAppointment');
-
-    // Removes the appointment from the screen immediately
-    setSavedAppointment(null);
-  }}
->
-  <Text style={styles.cancelButtonText}>
-    Cancel
-  </Text>
-</Pressable>
-            </View>
+            <Text style={styles.confirmedText}>
+              {appointmentStatus === 'accepted'
+                ? 'Accepted'
+                : appointmentStatus === 'declined'
+                ? 'Declined'
+                : 'Pending'}
+            </Text>
           </View>
-        )}
+
+          <Text style={styles.upcoming}>
+            Upcoming
+          </Text>
+        </View>
+
+        <View style={styles.designerRow}>
+          <Image
+            source={appointmentDesigner.avatar}
+            style={styles.avatar}
+            contentFit="cover"
+          />
+
+          <View>
+            <Text style={styles.designerName}>
+              {appointmentDesigner.name}
+            </Text>
+
+            <Text style={styles.serviceName}>
+              {appointment.service}
+            </Text>
+          </View>
+        </View>
+
+        <View style={styles.dateTimeRow}>
+          <View style={styles.infoBox}>
+            <Text style={styles.infoLabel}>
+              Date
+            </Text>
+
+            <Text style={styles.infoValue}>
+              {appointment.date}
+            </Text>
+          </View>
+
+          <View style={styles.infoBox}>
+            <Text style={styles.infoLabel}>
+              Time
+            </Text>
+
+            <Text style={styles.infoValue}>
+              {appointment.time}
+            </Text>
+          </View>
+        </View>
+
+        <View style={styles.actions}>
+          <Pressable
+            style={styles.chatButton}
+            onPress={() =>
+              router.push({
+                pathname: '/chat',
+                params: {
+                  id: appointmentDesigner.id.toString(),
+                },
+              })
+            }
+          >
+            <Text style={styles.chatButtonText}>
+              Chat with Artist
+            </Text>
+          </Pressable>
+
+          <Pressable
+            style={styles.cancelButton}
+            onPress={async () => {
+  // Creates a new list without the appointment the customer cancelled
+  const updatedAppointments = appointments.filter(
+    (_, appointmentIndex) => appointmentIndex !== index
+  );
+
+  // Saves the updated appointments list on the device
+  await AsyncStorage.setItem(
+    'customerAppointments',
+    JSON.stringify(updatedAppointments)
+  );
+
+  // Updates the screen immediately
+  setAppointments(updatedAppointments);
+
+  // If no appointments remain, also clears the old compatibility storage
+  if (updatedAppointments.length === 0) {
+    await AsyncStorage.removeItem('customerAppointment');
+    await AsyncStorage.removeItem('customerAppointmentStatus');
+
+    setSavedAppointment(null);
+    setAppointmentStatus('pending');
+  }
+}}
+          >
+            <Text style={styles.cancelButtonText}>
+              Cancel
+            </Text>
+          </Pressable>
+        </View>
       </View>
+    );
+  })}
+</>
+)}
+      </ScrollView>
     </View>
   );
 }
