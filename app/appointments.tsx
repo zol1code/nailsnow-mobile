@@ -209,7 +209,30 @@ useEffect(() => {
         date: routeDate,
         time: routeTime,
       };
+// Creates the unique key used to track this appointment's status
+const appointmentKey = getAppointmentKey(appointmentToSave);
 
+// Saves this new appointment with its own Pending status
+const savedStatuses = await AsyncStorage.getItem(
+  'customerAppointmentStatuses'
+);
+
+const currentStatuses = savedStatuses
+  ? JSON.parse(savedStatuses)
+  : {};
+
+const updatedStatuses = {
+  ...currentStatuses,
+  [appointmentKey]: 'pending',
+};
+
+await AsyncStorage.setItem(
+  'customerAppointmentStatuses',
+  JSON.stringify(updatedStatuses)
+);
+
+// Updates the status on the screen immediately
+setAppointmentStatuses(updatedStatuses);
       // Saves the newest appointment in the old storage key.
 // We keep this temporarily so the current app flow continues working.
 await AsyncStorage.setItem(
@@ -429,6 +452,29 @@ const getDesignerForAppointment = (
 
   // Updates the screen immediately
   setAppointments(updatedAppointments);
+
+  // Removes only the status connected to the cancelled appointment
+const appointmentKey = getAppointmentKey(appointment);
+
+const savedStatuses = await AsyncStorage.getItem(
+  'customerAppointmentStatuses'
+);
+
+if (savedStatuses) {
+  const currentStatuses = JSON.parse(savedStatuses);
+
+  // Removes this appointment from the status object
+  delete currentStatuses[appointmentKey];
+
+  // Saves the remaining appointment statuses
+  await AsyncStorage.setItem(
+    'customerAppointmentStatuses',
+    JSON.stringify(currentStatuses)
+  );
+
+  // Updates the status state on the screen immediately
+  setAppointmentStatuses(currentStatuses);
+}
 
   // If no appointments remain, also clears the old compatibility storage
   if (updatedAppointments.length === 0) {
