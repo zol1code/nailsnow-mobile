@@ -1,11 +1,18 @@
 import { Ionicons } from '@expo/vector-icons';
 // Stores appointments locally so they remain available after closing the app
 import AsyncStorage from '@react-native-async-storage/async-storage';
+
 // Stores appointments locally so they remain available after closing the app
 import { Image } from 'expo-image';
-import { router, useLocalSearchParams } from 'expo-router';
+import {
+  router,
+  useFocusEffect,
+  useLocalSearchParams,
+} from 'expo-router';
+
 // React hooks used to store and restore appointment data
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+
 import {
   Pressable,
   ScrollView,
@@ -141,7 +148,8 @@ const getAppointmentKey = (appointment: CustomerAppointment) =>
   loadSavedAppointment();
 }, []);
 // Loads the current appointment status saved by the designer
-useEffect(() => {
+useFocusEffect(
+  useCallback(() => {
   const loadAppointmentStatus = async () => {
     // Loads the old single appointment status.
     // We keep this temporarily for compatibility with older saved bookings.
@@ -169,7 +177,8 @@ useEffect(() => {
   };
 
   loadAppointmentStatus();
-}, []);
+}, [])
+);
 // Uses route parameters when available.
 // If the screen is opened directly, it falls back to the saved appointment.
 const designerId = Number(
@@ -243,15 +252,29 @@ await AsyncStorage.setItem(
 // Adds the new appointment to the appointments list
 // instead of replacing the previous appointment.
 setAppointments((prev) => {
-  const updatedAppointments = [...prev, appointmentToSave];
+  // Checks whether this exact appointment is already in the list.
+// This prevents the same booking from being saved more than once.
+const appointmentAlreadyExists = prev.some(
+  (appointment) =>
+    getAppointmentKey(appointment) ===
+    getAppointmentKey(appointmentToSave)
+);
 
-  // Saves all appointments locally on the device.
-  AsyncStorage.setItem(
-    'customerAppointments',
-    JSON.stringify(updatedAppointments)
-  );
+// If the appointment already exists, keep the current list unchanged.
+if (appointmentAlreadyExists) {
+  return prev;
+}
 
-  return updatedAppointments;
+// Adds the new appointment only when it does not already exist.
+const updatedAppointments = [...prev, appointmentToSave];
+
+// Saves the updated appointments list locally on the device.
+AsyncStorage.setItem(
+  'customerAppointments',
+  JSON.stringify(updatedAppointments)
+);
+
+return updatedAppointments;
 });
 
 // Keeps the old single-appointment state working for now
@@ -456,6 +479,47 @@ const getDesignerForAppointment = (
   // Removes only the status connected to the cancelled appointment
 const appointmentKey = getAppointmentKey(appointment);
 
+// Creates the same request ID used by the Designer Dashboard.
+// This allows us to remove old Accept/Decline actions for this booking.
+const designerRequestId = `customer-${appointmentKey}`;
+
+// Loads the designer's saved accepted and declined requests.
+const savedAcceptedRequests = await AsyncStorage.getItem(
+  'acceptedRequests'
+);
+
+const savedDeclinedRequests = await AsyncStorage.getItem(
+  'declinedRequests'
+);
+
+// Removes this cancelled booking from the accepted requests history.
+if (savedAcceptedRequests) {
+  const acceptedRequests = JSON.parse(savedAcceptedRequests);
+
+  const updatedAcceptedRequests = acceptedRequests.filter(
+    (requestId: string) => requestId !== designerRequestId
+  );
+
+  await AsyncStorage.setItem(
+    'acceptedRequests',
+    JSON.stringify(updatedAcceptedRequests)
+  );
+}
+
+// Removes this cancelled booking from the declined requests history.
+if (savedDeclinedRequests) {
+  const declinedRequests = JSON.parse(savedDeclinedRequests);
+
+  const updatedDeclinedRequests = declinedRequests.filter(
+    (requestId: string) => requestId !== designerRequestId
+  );
+
+  await AsyncStorage.setItem(
+    'declinedRequests',
+    JSON.stringify(updatedDeclinedRequests)
+  );
+}
+
 const savedStatuses = await AsyncStorage.getItem(
   'customerAppointmentStatuses'
 );
@@ -476,14 +540,28 @@ if (savedStatuses) {
   setAppointmentStatuses(currentStatuses);
 }
 
-  // If no appointments remain, also clears the old compatibility storage
-  if (updatedAppointments.length === 0) {
-    await AsyncStorage.removeItem('customerAppointment');
-    await AsyncStorage.removeItem('customerAppointmentStatus');
+// Keeps the old single-appointment storage synchronized
+// while the app is transitioning to multiple appointments.
+if (updatedAppointments.length === 0) {
+  // If there are no appointments left, clear the old compatibility storage.
+  await AsyncStorage.removeItem('customerAppointment');
+  await AsyncStorage.removeItem('customerAppointmentStatus');
 
-    setSavedAppointment(null);
-    setAppointmentStatus('pending');
-  }
+  setSavedAppointment(null);
+  setAppointmentStatus('pending');
+} else {
+  // If other appointments still exist, use the newest remaining appointment
+  // as the compatibility appointment instead of keeping a cancelled booking.
+  const newestRemainingAppointment =
+    updatedAppointments[updatedAppointments.length - 1];
+
+  await AsyncStorage.setItem(
+    'customerAppointment',
+    JSON.stringify(newestRemainingAppointment)
+  );
+
+  setSavedAppointment(newestRemainingAppointment);
+}
 }}
           >
             <Text style={styles.cancelButtonText}>

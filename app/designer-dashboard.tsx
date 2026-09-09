@@ -1,6 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
-import { useEffect, useState } from 'react';
+// Runs synchronization logic whenever the dashboard becomes active
+import { useFocusEffect } from 'expo-router';
+import { useCallback, useEffect, useState } from 'react';
 import {
   Pressable,
   ScrollView,
@@ -67,29 +69,39 @@ const [acceptedRequests, setAcceptedRequests] = useState<string[]>([]);
 const [declinedRequests, setDeclinedRequests] = useState<string[]>([]);
   // Loads the saved booking request actions when the dashboard opens.
 // This keeps accepted and declined requests after the app is closed.
-useEffect(() => {
-  const loadRequestActions = async () => {
-    const savedAcceptedRequests = await AsyncStorage.getItem(
-      'acceptedRequests'
-    );
+useFocusEffect(
+  useCallback(() => {
+    const loadRequestActions = async () => {
+      // Loads the IDs of requests previously accepted by the designer.
+      const savedAcceptedRequests = await AsyncStorage.getItem(
+        'acceptedRequests'
+      );
 
-    const savedDeclinedRequests = await AsyncStorage.getItem(
-      'declinedRequests'
-    );
+      // Loads the IDs of requests previously declined by the designer.
+      const savedDeclinedRequests = await AsyncStorage.getItem(
+        'declinedRequests'
+      );
 
-    // Restores previously accepted booking requests
-    if (savedAcceptedRequests) {
-      setAcceptedRequests(JSON.parse(savedAcceptedRequests));
-    }
+      // Restores accepted requests.
+      // If nothing was saved, resets the state to an empty list.
+      setAcceptedRequests(
+        savedAcceptedRequests
+          ? JSON.parse(savedAcceptedRequests)
+          : []
+      );
 
-    // Restores previously declined booking requests
-    if (savedDeclinedRequests) {
-      setDeclinedRequests(JSON.parse(savedDeclinedRequests));
-    }
-  };
+      // Restores declined requests.
+      // If nothing was saved, resets the state to an empty list.
+      setDeclinedRequests(
+        savedDeclinedRequests
+          ? JSON.parse(savedDeclinedRequests)
+          : []
+      );
+    };
 
-  loadRequestActions();
-}, []);
+    loadRequestActions();
+  }, [])
+);
   const pickImage = async () => {
   const result = await ImagePicker.launchImageLibraryAsync({
     mediaTypes: ['images'],
@@ -249,44 +261,58 @@ const [editingTime, setEditingTime] = useState<{
 ]);
   // Loads the customer's saved appointment and turns it into a designer request.
 // This connects the customer booking flow with the designer dashboard locally.
-useEffect(() => {
-  const loadCustomerAppointment = async () => {
-    const savedAppointment = await AsyncStorage.getItem(
-      'customerAppointment'
-    );
+useFocusEffect(
+  useCallback(() => {
+    const loadCustomerAppointments = async () => {
+      // Loads the list containing all customer appointments.
+      const savedAppointments = await AsyncStorage.getItem(
+        'customerAppointments'
+      );
 
-    if (savedAppointment) {
-      const appointment = JSON.parse(savedAppointment);
+      // Keeps compatibility with older bookings created
+      // before multiple appointments were implemented.
+      const savedAppointment = await AsyncStorage.getItem(
+        'customerAppointment'
+      );
 
-      const newRequest: BookingRequest = {
-        // Creates a stable unique ID for this customer booking
-id: `customer-${appointment.designerId}-${appointment.date}-${appointment.time}`,
-        client: 'Customer',
-        service: appointment.service,
-        date: `${appointment.date} · ${appointment.time}`,
-        avatar: img(P.a1, 60, 60),
-        status: 'pending',
-      };
+      let customerAppointments = [];
+
+      // Uses the new appointments list when available.
+      if (savedAppointments) {
+        customerAppointments = JSON.parse(savedAppointments);
+      } else if (savedAppointment) {
+        // Falls back to the old single appointment if needed.
+        customerAppointments = [JSON.parse(savedAppointment)];
+      }
+
+      // Converts every customer appointment into a designer booking request.
+      const customerRequests: BookingRequest[] =
+        customerAppointments.map((appointment) => ({
+          // Creates a stable unique ID for each customer booking.
+          id: `customer-${appointment.designerId}-${appointment.date}-${appointment.time}`,
+          client: 'Customer',
+          service: appointment.service,
+          date: `${appointment.date} · ${appointment.time}`,
+          avatar: img(P.a1, 60, 60),
+          status: 'pending',
+        }));
 
       setRequests((prev) => {
-        const alreadyExists = prev.some(
-          (request) =>
-            request.service === newRequest.service &&
-            request.date === newRequest.date
+        // Keeps only the original/static requests.
+        // Customer requests are rebuilt from the current saved appointments.
+        const existingRequests = prev.filter(
+          (request) => !request.id.startsWith('customer-')
         );
 
-        // Prevents the same booking from being added more than once
-        if (alreadyExists) {
-          return prev;
-        }
-
-        return [newRequest, ...prev];
+        // Adds all current customer bookings again.
+        // This also removes cancelled bookings automatically.
+        return [...customerRequests, ...existingRequests];
       });
-    }
-  };
+    };
 
-  loadCustomerAppointment();
-}, []);
+    loadCustomerAppointments();
+  }, [])
+);
   // Creates the notification list automatically from pending booking requests.
 // This keeps the notification panel synchronized with the Requests section.
 // Creates notifications only for booking requests that are still pending.
@@ -865,14 +891,6 @@ setAcceptedRequests((prev) => {
       'acceptedRequests',
       JSON.stringify(updatedAccepted)
     );
-    // Saves the customer appointment status when the designer accepts it.
-// This allows the customer side to know that the booking was accepted.
-if (request.id.startsWith('customer-')) {
-  AsyncStorage.setItem(
-    'customerAppointmentStatus',
-    'accepted'
-  );
-}
 
 // Saves the accepted status for this specific appointment.
 // The customer side uses the same booking key without the "customer-" prefix.
@@ -898,23 +916,6 @@ if (request.id.startsWith('customer-')) {
   );
 }
 
-    // Updates the customer's saved appointment when this is a real customer request.
-// This allows the customer side to see that the booking was accepted.
-if (request.id.startsWith('customer-')) {
-  AsyncStorage.getItem('customerAppointment').then((savedAppointment) => {
-    if (savedAppointment) {
-      const appointment = JSON.parse(savedAppointment);
-
-      AsyncStorage.setItem(
-        'customerAppointment',
-        JSON.stringify({
-          ...appointment,
-          status: 'accepted',
-        })
-      );
-    }
-  });
-}
 
     return updatedAccepted;
   });
@@ -929,23 +930,7 @@ if (request.id.startsWith('customer-')) {
       'declinedRequests',
       JSON.stringify(updatedDeclined)
     );
-    // Updates the customer's saved appointment when this is a real customer request.
-// This allows the customer side to see that the booking was declined.
-if (request.id.startsWith('customer-')) {
-  AsyncStorage.getItem('customerAppointment').then((savedAppointment) => {
-    if (savedAppointment) {
-      const appointment = JSON.parse(savedAppointment);
-
-      AsyncStorage.setItem(
-        'customerAppointment',
-        JSON.stringify({
-          ...appointment,
-          status: 'declined',
-        })
-      );
-    }
-  });
-}
+  
 
     return updatedDeclined;
   });
@@ -969,14 +954,6 @@ if (request.id.startsWith('customer-')) {
       'declinedRequests',
       JSON.stringify(updatedDeclined)
     );
-    // Saves the customer appointment status when the designer declines it.
-// This allows the customer side to know that the booking was declined.
-if (request.id.startsWith('customer-')) {
-  AsyncStorage.setItem(
-    'customerAppointmentStatus',
-    'declined'
-  );
-}
 
 // Saves the declined status for this specific appointment.
 // The customer side uses the same booking key without the "customer-" prefix.

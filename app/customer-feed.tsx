@@ -175,58 +175,76 @@ export default function CustomerFeed() {
     'Closest',
     'Budget-Friendly',
   ];
+const filtered = DESIGNERS.filter((designer) => {
+  const query = search.toLowerCase();
 
-  const filtered = DESIGNERS.filter((designer) => {
-    const query = search.toLowerCase();
+  const matchesSearch =
+    designer.name.toLowerCase().includes(query) ||
+    designer.specialty.toLowerCase().includes(query);
 
-    const matchesSearch =
-      designer.name.toLowerCase().includes(query) ||
-      designer.specialty.toLowerCase().includes(query);
-
-    if (filter === 'Available Now') {
-      return matchesSearch && designer.available;
-    }
-
-    if (filter === 'Top Rated') {
-      return matchesSearch && designer.rating >= 4.8;
-    }
-
-    if (filter === 'Budget-Friendly') {
-      return matchesSearch && designer.priceFrom <= 35;
-    }
-
-    return matchesSearch;
-  });
-
-  function toggleLike(id: number) {
-    setLiked((current) =>
-      current.includes(id)
-        ? current.filter((designerId) => designerId !== id)
-        : [...current, id]
-    );
+  if (filter === 'Available Now') {
+    return matchesSearch && designer.available;
   }
 
-  return (
-    <View style={styles.container}>
-      <ScrollView showsVerticalScrollIndicator={false}>
-        {/* Header */}
-        <View style={styles.header}>
-          <View style={styles.headerTop}>
-            <View>
-              <Text style={styles.locationLabel}>YOUR LOCATION</Text>
+  if (filter === 'Top Rated') {
+    return matchesSearch && designer.rating >= 4.8;
+  }
 
-              <View style={styles.locationRow}>
-                <Ionicons
-                  name="location"
-                  size={14}
-                  color={COLORS.primary}
-                />
+  if (filter === 'Budget-Friendly') {
+    return matchesSearch && designer.priceFrom <= 35;
+  }
 
-                <Text style={styles.location}>
-                  Brooklyn, New York
-                </Text>
-              </View>
+  // Closest keeps all matching designers here.
+  // The actual distance sorting happens below.
+  if (filter === 'Closest') {
+    return matchesSearch;
+  }
+
+  return matchesSearch;
+});
+
+// Creates the final list shown on screen.
+// When Closest is selected, designers are ordered
+// from the shortest distance to the longest distance.
+const displayedDesigners =
+  filter === 'Closest'
+    ? [...filtered].sort(
+        (a, b) =>
+          parseFloat(a.distance) - parseFloat(b.distance)
+      )
+    : filtered;
+
+function toggleLike(id: number) {
+  setLiked((current) =>
+    current.includes(id)
+      ? current.filter((designerId) => designerId !== id)
+      : [...current, id]
+  );
+}
+
+return (
+  <View style={styles.container}>
+    <ScrollView showsVerticalScrollIndicator={false}>
+      {/* Header */}
+      <View style={styles.header}>
+        <View style={styles.headerTop}>
+          <View>
+            <Text style={styles.locationLabel}>
+              YOUR LOCATION
+            </Text>
+
+            <View style={styles.locationRow}>
+              <Ionicons
+                name="location"
+                size={14}
+                color={COLORS.primary}
+              />
+
+              <Text style={styles.location}>
+                Brooklyn, New York
+              </Text>
             </View>
+          </View>
 
             <View style={styles.headerButtons}>
               <Pressable

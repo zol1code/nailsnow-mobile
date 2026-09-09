@@ -539,6 +539,36 @@ export default function DesignerProfileScreen() {
           {tab === 'Reviews' && (
             <View style={styles.reviews}>
               <View style={styles.reviewSummary}>
+              {/* Shows the rating distribution from 5 stars to 1 star */}
+<View style={styles.ratingBreakdown}>
+  {[5, 4, 3, 2, 1].map((star) => (
+    <View key={star} style={styles.ratingRow}>
+      <Text style={styles.ratingLabel}>
+        {star}★
+      </Text>
+
+      <View style={styles.ratingTrack}>
+        <View
+          style={[
+            styles.ratingFill,
+            {
+              width:
+                star === 5
+                  ? '78%'
+                  : star === 4
+                  ? '16%'
+                  : star === 3
+                  ? '4%'
+                  : star === 2
+                  ? '1%'
+                  : '1%',
+            },
+          ]}
+        />
+      </View>
+    </View>
+  ))}
+</View>
                 <Text style={styles.bigRating}>
                   {designer.rating.toFixed(1)}
                 </Text>
@@ -887,6 +917,43 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: COLORS.mutedForeground,
   },
+
+  // Container for the rating distribution bars
+ratingBreakdown: {
+  width: '100%',
+  marginTop: 14,
+  gap: 8,
+},
+
+// One row for each star rating
+ratingRow: {
+  flexDirection: 'row',
+  alignItems: 'center',
+  gap: 8,
+},
+
+// Label shown before each rating bar, for example "5★"
+ratingLabel: {
+  width: 28,
+  fontSize: 11,
+  color: COLORS.mutedForeground,
+},
+
+// Background track for each rating bar
+ratingTrack: {
+  flex: 1,
+  height: 7,
+  borderRadius: 999,
+  backgroundColor: COLORS.muted,
+  overflow: 'hidden',
+},
+
+// Filled portion of each rating bar
+ratingFill: {
+  height: '100%',
+  borderRadius: 999,
+  backgroundColor: COLORS.primary,
+},
 
   reviewCard: {
     backgroundColor: COLORS.card,
