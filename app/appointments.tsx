@@ -87,6 +87,17 @@ const [appointmentStatus, setAppointmentStatus] = useState<
   'pending' | 'accepted' | 'declined'
 >('pending');
 
+// Stores the status of each appointment separately.
+// The key identifies the booking and the value stores its current status.
+const [appointmentStatuses, setAppointmentStatuses] = useState<
+  Record<string, 'pending' | 'accepted' | 'declined'>
+>({});
+
+// Creates a unique key for each appointment.
+// This lets the app store a different status for every booking.
+const getAppointmentKey = (appointment: CustomerAppointment) =>
+  `${appointment.designerId}-${appointment.date}-${appointment.time}`;
+
 // Loads a previously saved appointment when this screen opens.
 // This allows the appointment to remain available after closing the app.
 
@@ -132,11 +143,23 @@ const [appointmentStatus, setAppointmentStatus] = useState<
 // Loads the current appointment status saved by the designer
 useEffect(() => {
   const loadAppointmentStatus = async () => {
+    // Loads the old single appointment status.
+    // We keep this temporarily for compatibility with older saved bookings.
     const savedStatus = await AsyncStorage.getItem(
       'customerAppointmentStatus'
     );
 
-    // Restores the booking status if one was previously saved
+    // Loads the new object containing one status per appointment.
+    const savedStatuses = await AsyncStorage.getItem(
+      'customerAppointmentStatuses'
+    );
+
+    // Restores all individual appointment statuses.
+    if (savedStatuses) {
+      setAppointmentStatuses(JSON.parse(savedStatuses));
+    }
+
+    // Restores the old single status if one exists.
     if (
       savedStatus === 'accepted' ||
       savedStatus === 'declined'
@@ -319,13 +342,13 @@ const getDesignerForAppointment = (
           <View style={styles.confirmedBadge}>
             <View style={styles.statusDot} />
 
-            <Text style={styles.confirmedText}>
-              {appointmentStatus === 'accepted'
-                ? 'Accepted'
-                : appointmentStatus === 'declined'
-                ? 'Declined'
-                : 'Pending'}
-            </Text>
+           <Text style={styles.confirmedText}>
+  {appointmentStatuses[getAppointmentKey(appointment)] === 'accepted'
+    ? 'Accepted'
+    : appointmentStatuses[getAppointmentKey(appointment)] === 'declined'
+    ? 'Declined'
+    : 'Pending'}
+</Text>
           </View>
 
           <Text style={styles.upcoming}>

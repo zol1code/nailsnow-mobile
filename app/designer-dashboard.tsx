@@ -874,6 +874,30 @@ if (request.id.startsWith('customer-')) {
   );
 }
 
+// Saves the accepted status for this specific appointment.
+// The customer side uses the same booking key without the "customer-" prefix.
+if (request.id.startsWith('customer-')) {
+  const appointmentKey = request.id.replace('customer-', '');
+
+  AsyncStorage.getItem('customerAppointmentStatuses').then(
+    (savedStatuses) => {
+      const statuses = savedStatuses
+        ? JSON.parse(savedStatuses)
+        : {};
+
+      const updatedStatuses = {
+        ...statuses,
+        [appointmentKey]: 'accepted',
+      };
+
+      AsyncStorage.setItem(
+        'customerAppointmentStatuses',
+        JSON.stringify(updatedStatuses)
+      );
+    }
+  );
+}
+
     // Updates the customer's saved appointment when this is a real customer request.
 // This allows the customer side to see that the booking was accepted.
 if (request.id.startsWith('customer-')) {
@@ -951,6 +975,30 @@ if (request.id.startsWith('customer-')) {
   AsyncStorage.setItem(
     'customerAppointmentStatus',
     'declined'
+  );
+}
+
+// Saves the declined status for this specific appointment.
+// The customer side uses the same booking key without the "customer-" prefix.
+if (request.id.startsWith('customer-')) {
+  const appointmentKey = request.id.replace('customer-', '');
+
+  AsyncStorage.getItem('customerAppointmentStatuses').then(
+    (savedStatuses) => {
+      const statuses = savedStatuses
+        ? JSON.parse(savedStatuses)
+        : {};
+
+      const updatedStatuses = {
+        ...statuses,
+        [appointmentKey]: 'declined',
+      };
+
+      AsyncStorage.setItem(
+        'customerAppointmentStatuses',
+        JSON.stringify(updatedStatuses)
+      );
+    }
   );
 }
 
