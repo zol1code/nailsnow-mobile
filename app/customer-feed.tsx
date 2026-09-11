@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
-import { useState } from 'react';
+
+import { useEffect, useState } from 'react';
 import {
   Pressable,
   ScrollView,
@@ -10,7 +11,9 @@ import {
   View,
 } from 'react-native';
 
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from 'expo-router';
+
 
 const COLORS = {
   background: '#FDF5EF',
@@ -167,6 +170,23 @@ export default function CustomerFeed() {
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('All');
   const [liked, setLiked] = useState<number[]>([]);
+  // Loads the saved favorite designers when the screen opens.
+useEffect(() => {
+  const loadLikedDesigners = async () => {
+    const savedLiked = await AsyncStorage.getItem('likedDesigners');
+
+    if (savedLiked) {
+      setLiked(JSON.parse(savedLiked));
+    }
+  };
+
+  loadLikedDesigners();
+}, []);
+
+// Saves favorite designers whenever the liked list changes.
+useEffect(() => {
+  AsyncStorage.setItem('likedDesigners', JSON.stringify(liked));
+}, [liked]);
 
   const filters = [
     'All',
