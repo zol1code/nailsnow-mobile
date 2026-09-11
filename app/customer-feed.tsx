@@ -2,12 +2,12 @@ import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { useState } from 'react';
 import {
-    Pressable,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    View,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
 } from 'react-native';
 
 import { router } from 'expo-router';
@@ -323,8 +323,7 @@ return (
           <Text style={styles.artistCount}>
             {filtered.length} artists near you
           </Text>
-
-          {filtered.map((designer) => (
+{displayedDesigners.map((designer) => (
             <Pressable
   key={designer.id}
   style={styles.card}
