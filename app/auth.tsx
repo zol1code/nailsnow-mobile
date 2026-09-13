@@ -1,12 +1,13 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
 import {
-    Pressable,
-    StyleSheet,
-    Text,
-    TextInput,
-    View,
+  Pressable,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
 } from 'react-native';
+import { supabase } from '../lib/supabase';
 
 const COLORS = {
   background: '#FDF5EF',
@@ -18,6 +19,7 @@ const COLORS = {
 };
 
 export default function AuthScreen() {
+  
   const params = useLocalSearchParams();
   const userType = params.userType;
 
@@ -27,8 +29,105 @@ export default function AuthScreen() {
   const [password, setPassword] = useState('');
 
   const isDesigner = userType === 'designer';
+ // Handles both account creation and login using Supabase.
+async function handleAuth() {
+  // Stops the process if email or password are empty.
+  if (!email.trim() || !password.trim()) {
+    return;
+  }
 
-  return (
+  // Starts with the account type selected during sign up.
+  let authenticatedUserType = isDesigner ? 'designer' : 'customer';
+
+  if (isLogin) {
+    // Logs in an existing user and returns the authenticated account.
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email: email.trim(),
+      password,
+    });
+
+    if (error) {
+      console.log('Login error:', error.message);
+      return;
+    }
+
+   // Reads the account type saved when the account was created.
+// Reads the user's profile from the database.
+// The profiles table is now the official source for the account type.
+const { data: profile, error: profileError } = await supabase
+  .from('profiles')
+  .select('user_type')
+  .eq('id', data.user.id)
+  .single();
+
+if (profileError) {
+  console.log('Profile read error:', profileError.message);
+  return;
+}
+
+const savedUserType = profile.user_type;
+
+// Only accepts accounts that already have a valid user type.
+// Older accounts without user_type are blocked so the app
+// does not accidentally send them to the wrong dashboard.
+if (savedUserType === 'designer' || savedUserType === 'customer') {
+  authenticatedUserType = savedUserType;
+} else {
+  console.log('Login error: this account has no user_type');
+  return;
+}
+  } else {
+    // Creates a new Supabase account.
+    // Creates the authentication account and keeps the new user data
+// so we can use the same user ID when creating the profile.
+const { data, error } = await supabase.auth.signUp({
+      email: email.trim(),
+      password,
+      options: {
+        data: {
+          name: name.trim(),
+          user_type: authenticatedUserType,
+        },
+      },
+    });
+
+    if (error) {
+      console.log('Sign up error:', error.message);
+      return;
+    }
+    // Creates the user's profile using the same ID from Supabase Auth.
+if (data.user) {
+  
+
+  
+
+  // Creates the user's profile using the same ID from Supabase Auth.
+  const { error: profileError } = await supabase
+    .from('profiles')
+    .insert({
+      id: data.user.id,
+      name: name.trim(),
+      user_type: authenticatedUserType,
+    });
+
+  if (profileError) {
+    console.log('Profile creation error:', profileError.message);
+    return;
+  }
+}
+  }
+  
+
+  // Sends the authenticated user to the correct area
+  // based on the account type stored in Supabase.
+  if (authenticatedUserType === 'designer') {
+    router.push('/designer-dashboard');
+  } else {
+    router.push('/customer-feed');
+  }
+}
+
+return (
     <View style={styles.container}>
       <View style={styles.header}>
         <Pressable style={styles.backButton} onPress={() => router.back()}>
@@ -109,13 +208,7 @@ export default function AuthScreen() {
 
         <Pressable
   style={styles.mainButton}
-  onPress={() => {
-   if (isDesigner) {
-  router.push('/designer-dashboard');
-} else {
-  router.push('/customer-feed');
-}
-  }}
+onPress={handleAuth}
 >
           <Text style={styles.mainButtonText}>
             {isLogin

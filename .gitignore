@@ -30,7 +30,9 @@ yarn-error.*
 .DS_Store
 *.pem
 
-# local env files
+# local environment files
+# Keeps Supabase configuration out of the Git repository
+.env
 .env*.local
 
 # typescript
