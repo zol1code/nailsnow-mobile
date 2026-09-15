@@ -1,7 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 // Runs synchronization logic whenever the dashboard becomes active
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
+
 import { useCallback, useEffect, useState } from 'react';
 import {
   Pressable,
@@ -10,6 +11,8 @@ import {
   Text,
   View,
 } from 'react-native';
+import { supabase } from '../lib/supabase';
+
 
 import * as ImagePicker from 'expo-image-picker';
 
@@ -60,7 +63,48 @@ type BookingRequest = {
 };
 
 export default function DesignerDashboard() {
+  // Controls navigation from the designer dashboard.
+const router = useRouter();
   const [tab, setTab] = useState('Overview');
+  // Stores the logged-in designer's real profile from Supabase.
+const [designerProfile, setDesignerProfile] = useState<{
+  name: string | null;
+  bio: string | null;
+  location: string | null;
+  avatar_url: string | null;
+} | null>(null);
+// Loads the logged-in designer's profile from Supabase
+// whenever the dashboard becomes active.
+useFocusEffect(
+  useCallback(() => {
+    const loadDesignerProfile = async () => {
+      // Gets the currently authenticated user.
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (!user) {
+        return;
+      }
+
+      // Reads the designer's profile using the authenticated user's ID.
+      const { data: profile, error } = await supabase
+        .from('profiles')
+        .select('name, bio, location, avatar_url')
+        .eq('id', user.id)
+        .maybeSingle();
+
+      if (error) {
+        console.log('Designer profile error:', error.message);
+        return;
+      }
+
+      setDesignerProfile(profile);
+    };
+
+    loadDesignerProfile();
+  }, [])
+);
   // Controls whether the notifications panel is visible
 const [showNotifications, setShowNotifications] = useState(false);
 // Stores unique request IDs instead of array positions.
@@ -363,7 +407,7 @@ useEffect(() => {
             </Text>
 
             <Text style={styles.name}>
-              Sofia ✦
+              {designerProfile?.name ?? 'Designer'} ✦
             </Text>
           </View>
 
@@ -388,11 +432,14 @@ useEffect(() => {
   )}
 </Pressable>
 
-            <Image
-              source={img(P.a1, 80, 80)}
-              style={styles.profileImage}
-              contentFit="cover"
-            />
+           {/* Opens the designer profile editing screen when the profile photo is tapped. */}
+<Pressable onPress={() => router.push('/edit-designer-profile')}>
+  <Image
+    source={designerProfile?.avatar_url || img(P.a1, 80, 80)}
+    style={styles.profileImage}
+    contentFit="cover"
+  />
+</Pressable>
           </View>
         </View>
         {/* Shows the notifications panel when the bell button is pressed */}

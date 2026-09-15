@@ -3,11 +3,11 @@ import { Image } from 'expo-image';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
 import {
-    Pressable,
-    ScrollView,
-    StyleSheet,
-    Text,
-    View,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
 } from 'react-native';
 
 const COLORS = {
@@ -358,6 +358,7 @@ export default function DesignerProfileScreen() {
   const [tab, setTab] = useState('Portfolio');
 
   const tabs = ['Portfolio', 'Services', 'Reviews'];
+  
 
   return (
     <View style={styles.container}>
