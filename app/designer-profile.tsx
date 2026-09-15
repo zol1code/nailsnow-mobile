@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Pressable,
   ScrollView,
@@ -9,6 +9,7 @@ import {
   Text,
   View,
 } from 'react-native';
+import { supabase } from '../lib/supabase';
 
 const COLORS = {
   background: '#FDF5EF',
@@ -350,12 +351,46 @@ function Stars({ rating }: { rating: number }) {
 
 export default function DesignerProfileScreen() {
   const params = useLocalSearchParams();
-  const id = Number(params.id ?? 1);
-
-  const designer =
-    DESIGNERS.find((item) => item.id === id) ?? DESIGNERS[0];
+// ID received from the Customer Feed.
+// Real Supabase designer IDs are UUID strings.
+const profileId = String(params.id ?? '');
+  // Keeps the old mock designer only as a temporary fallback
+// while services, reviews and portfolio are still being migrated.
+const designer = DESIGNERS[0];
 
   const [tab, setTab] = useState('Portfolio');
+  // Stores the real designer profile loaded from Supabase.
+const [realProfile, setRealProfile] = useState<{
+  name: string | null;
+  bio: string | null;
+  location: string | null;
+  avatar_url: string | null;
+  instagram: string | null;
+  years_experience: number | null;
+  starting_price: number | null;
+} | null>(null);
+// Loads the real designer profile from Supabase.
+useEffect(() => {
+  const loadRealProfile = async () => {
+    
+    const { data: profile, error } = await supabase
+      .from('profiles')
+      .select(
+        'name, bio, location, avatar_url, instagram, years_experience, starting_price'
+      )
+      .eq('id', profileId)
+      .maybeSingle();
+
+    if (error) {
+      console.log('Public designer profile error:', error.message);
+      return;
+    }
+
+    setRealProfile(profile);
+  };
+
+  loadRealProfile();
+}, [profileId]);
 
   const tabs = ['Portfolio', 'Services', 'Reviews'];
   
@@ -389,11 +424,11 @@ export default function DesignerProfileScreen() {
         {/* Information */}
         <View style={styles.info}>
           <View style={styles.avatarRow}>
-            <Image
-              source={designer.avatar}
-              style={styles.avatar}
-              contentFit="cover"
-            />
+          <Image
+  source={realProfile?.avatar_url || designer.avatar}
+  style={styles.avatar}
+  contentFit="cover"
+/>
 
             <View style={styles.badges}>
               {designer.available && (
@@ -420,8 +455,9 @@ export default function DesignerProfileScreen() {
             </View>
           </View>
 
-          <Text style={styles.name}>{designer.name}</Text>
-
+<Text style={styles.name}>
+  {realProfile?.name ?? designer.name}
+</Text>
           <Text style={styles.specialty}>
             {designer.specialty}
           </Text>
@@ -446,9 +482,9 @@ export default function DesignerProfileScreen() {
                 color={COLORS.mutedForeground}
               />
 
-              <Text style={styles.detailText}>
-                {designer.location}
-              </Text>
+             <Text style={styles.detailText}>
+  {realProfile?.location ?? designer.location}
+</Text>
             </View>
 
             <View style={styles.detail}>
@@ -464,10 +500,9 @@ export default function DesignerProfileScreen() {
             </View>
           </View>
 
-          <Text style={styles.about}>
-            {designer.about}
-          </Text>
-
+        <Text style={styles.about}>
+  {realProfile?.bio || designer.about}
+</Text>
           {/* Tabs */}
           <View style={styles.tabs}>
             {tabs.map((item) => (
@@ -926,12 +961,7 @@ ratingBreakdown: {
   gap: 8,
 },
 
-// One row for each star rating
-ratingRow: {
-  flexDirection: 'row',
-  alignItems: 'center',
-  gap: 8,
-},
+
 
 // Label shown before each rating bar, for example "5★"
 ratingLabel: {

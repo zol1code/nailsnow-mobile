@@ -2,7 +2,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 // Runs synchronization logic whenever the dashboard becomes active
 import { useFocusEffect, useRouter } from 'expo-router';
-
 import { useCallback, useEffect, useState } from 'react';
 import {
   Pressable,
@@ -65,6 +64,17 @@ type BookingRequest = {
 export default function DesignerDashboard() {
   // Controls navigation from the designer dashboard.
 const router = useRouter();
+// Signs the current user out and returns to the authentication screen.
+const handleLogout = async () => {
+  const { error } = await supabase.auth.signOut();
+
+  if (error) {
+    console.log('Logout error:', error.message);
+    return;
+  }
+
+router.replace('/auth');
+};
   const [tab, setTab] = useState('Overview');
   // Stores the logged-in designer's real profile from Supabase.
 const [designerProfile, setDesignerProfile] = useState<{
@@ -146,27 +156,90 @@ useFocusEffect(
     loadRequestActions();
   }, [])
 );
-  const pickImage = async () => {
+const pickImage = async () => {
+  // Opens the phone gallery and allows the designer to select multiple photos.
   const result = await ImagePicker.launchImageLibraryAsync({
     mediaTypes: ['images'],
     allowsMultipleSelection: true,
     quality: 1,
   });
 
-  if (!result.canceled) {
-  const newPhotos = result.assets.map((asset) => asset.uri);
+  if (result.canceled) {
+    return;
+  }
 
-  setPortfolio((prev) => {
-  const updatedPortfolio = [...prev, ...newPhotos];
+  // Gets the currently logged-in designer.
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
 
-  AsyncStorage.setItem(
-    'designerPortfolio',
-    JSON.stringify(updatedPortfolio)
-  );
+  if (!user) {
+    console.log('Portfolio upload error: user not logged in');
+    return;
+  }
 
-  return updatedPortfolio;
-});
-}
+  const uploadedPhotos: string[] = [];
+
+  // Uploads every selected image separately.
+  for (const asset of result.assets) {
+    try {
+      // Reads the local Expo image URI.
+      const response = await fetch(asset.uri);
+      const arrayBuffer = await response.arrayBuffer();
+
+      // Creates a unique filename inside the designer's own folder.
+      const extension =
+        asset.fileName?.split('.').pop()?.toLowerCase() ?? 'jpg';
+
+      const filePath =
+        `${user.id}/${Date.now()}-${Math.random()
+          .toString(36)
+          .slice(2)}.${extension}`;
+
+      // Uploads the image to Supabase Storage.
+      const { error: uploadError } = await supabase.storage
+        .from('designer-portfolios')
+        .upload(filePath, arrayBuffer, {
+          contentType: asset.mimeType ?? 'image/jpeg',
+          upsert: false,
+        });
+
+      if (uploadError) {
+        console.log(
+          'Portfolio upload error:',
+          uploadError.message
+        );
+        continue;
+      }
+
+      // Gets the permanent public URL for the uploaded image.
+      const { data: publicUrlData } = supabase.storage
+        .from('designer-portfolios')
+        .getPublicUrl(filePath);
+
+      uploadedPhotos.push(publicUrlData.publicUrl);
+    } catch (error) {
+      console.log('Portfolio image error:', error);
+    }
+  }
+
+  // Adds successfully uploaded photos to the existing portfolio.
+  if (uploadedPhotos.length > 0) {
+    setPortfolio((prev) => {
+      const updatedPortfolio = [
+        ...prev,
+        ...uploadedPhotos,
+      ];
+
+      // Keeps the local copy for the current dashboard implementation.
+      AsyncStorage.setItem(
+        'designerPortfolio',
+        JSON.stringify(updatedPortfolio)
+      );
+
+      return updatedPortfolio;
+    });
+  }
 };
   const [availableDays, setAvailableDays] = useState([
   'Monday',
@@ -319,8 +392,12 @@ useFocusEffect(
         'customerAppointment'
       );
 
-      let customerAppointments = [];
-
+let customerAppointments: {
+  designerId: string | number;
+  date: string;
+  time: string;
+  service: string;
+}[] = [];
       // Uses the new appointments list when available.
       if (savedAppointments) {
         customerAppointments = JSON.parse(savedAppointments);
@@ -412,6 +489,17 @@ useEffect(() => {
           </View>
 
           <View style={styles.headerActions}>
+            {/* Logs the designer out of the current account. */}
+<Pressable
+  style={styles.iconButton}
+  onPress={handleLogout}
+>
+  <Ionicons
+    name="log-out-outline"
+    size={18}
+    color={COLORS.foreground}
+  />
+</Pressable>
             <Pressable
   style={styles.iconButton}
   onPress={() => setShowNotifications((prev) => !prev)}

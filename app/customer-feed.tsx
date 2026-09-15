@@ -13,7 +13,7 @@ import {
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from 'expo-router';
-
+import { supabase } from '../lib/supabase';
 
 const COLORS = {
   background: '#FDF5EF',
@@ -50,8 +50,7 @@ const P = {
 };
 
 type Designer = {
-  id: number;
-  name: string;
+id: string | number;  name: string;
   specialty: string;
   distance: string;
   rating: number;
@@ -167,9 +166,60 @@ const DESIGNERS: Designer[] = [
 ];
 
 export default function CustomerFeed() {
+  // Signs the customer out and returns to the authentication screen.
+const handleLogout = async () => {
+  const { error } = await supabase.auth.signOut();
+
+  if (error) {
+    console.log('Customer logout error:', error.message);
+    return;
+  }
+
+  router.replace('/auth');
+};
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('All');
-  const [liked, setLiked] = useState<number[]>([]);
+const [liked, setLiked] = useState<(string | number)[]>([]);
+  // Stores real nail designers loaded from Supabase.
+const [realDesigners, setRealDesigners] = useState<any[]>([]);
+// Loads real nail designers from Supabase when the Customer Feed opens.
+useEffect(() => {
+  const loadRealDesigners = async () => {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select(
+        'id, name, bio, location, avatar_url, years_experience, available_now, starting_price, rating'
+      )
+      .eq('user_type', 'designer');
+
+    if (error) {
+      console.log('Customer feed designers error:', error.message);
+      return;
+    }
+console.log('REAL DESIGNERS FROM SUPABASE:', data);
+    setRealDesigners(data ?? []);
+  };
+
+  loadRealDesigners();
+}, []);
+// Converts Supabase profiles into the format currently used by the feed cards.
+const supabaseDesigners = realDesigners.map((profile) => ({
+  id: profile.id,
+  name: profile.name ?? 'Nail Designer',
+  specialty: 'Nail Artist',
+  distance: profile.location ?? 'Location not provided',
+  rating: Number(profile.rating ?? 0),
+  reviewCount: 0,
+  priceFrom: Number(profile.starting_price ?? 0),
+  available: profile.available_now ?? false,
+  avatar: profile.avatar_url || img(P.a1, 200, 200),
+
+  // Temporary portfolio until designer portfolios are stored in Supabase.
+  portfolio: [N.tortoise, N.nude, N.silver].map((id) => img(id)),
+
+  // Identity verification will be connected later.
+  verified: false,
+}));
   // Loads the saved favorite designers when the screen opens.
 useEffect(() => {
   const loadLikedDesigners = async () => {
@@ -195,8 +245,7 @@ useEffect(() => {
     'Closest',
     'Budget-Friendly',
   ];
-const filtered = DESIGNERS.filter((designer) => {
-  const query = search.toLowerCase();
+const filtered = supabaseDesigners.filter((designer) => {  const query = search.toLowerCase();
 
   const matchesSearch =
     designer.name.toLowerCase().includes(query) ||
@@ -234,7 +283,7 @@ const displayedDesigners =
       )
     : filtered;
 
-function toggleLike(id: number) {
+function toggleLike(id: string | number) {
   setLiked((current) =>
     current.includes(id)
       ? current.filter((designerId) => designerId !== id)
@@ -267,6 +316,17 @@ return (
           </View>
 
             <View style={styles.headerButtons}>
+              {/* Logs the customer out and returns to the login screen. */}
+<Pressable
+  style={styles.calendarButton}
+  onPress={handleLogout}
+>
+  <Ionicons
+    name="log-out-outline"
+    size={18}
+    color={COLORS.foreground}
+  />
+</Pressable>
               <Pressable
   style={styles.calendarButton}
   onPress={() => router.push('/appointments')}

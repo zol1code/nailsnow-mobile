@@ -35,6 +35,10 @@ export default function EditDesignerProfile() {
 const [instagram, setInstagram] = useState('');
 // Stores the designer's years of professional experience.
 const [yearsExperience, setYearsExperience] = useState('');
+// Stores the designer's private phone number.
+const [phone, setPhone] = useState('');
+// Stores the designer's starting service price.
+const [startingPrice, setStartingPrice] = useState('');
   // Stores the designer's current profile photo URL.
 const [avatarUrl, setAvatarUrl] = useState('');
 
@@ -54,9 +58,10 @@ const [avatarUrl, setAvatarUrl] = useState('');
 // Loads all editable profile fields, including the saved profile photo.
 // Loads all editable designer profile fields from Supabase.
 // Loads all editable designer profile fields from Supabase.
+// Loads all editable designer profile fields from Supabase.
 .select(
-  'name, bio, location, avatar_url, instagram, years_experience'
-)       .eq('id', user.id)
+  'name, bio, location, avatar_url, instagram, years_experience, phone, starting_price'
+)      .eq('id', user.id)
         .maybeSingle();
 
       if (error) {
@@ -75,7 +80,14 @@ setAvatarUrl(profile.avatar_url ?? '');
 // Loads the designer's saved years of experience.
 setYearsExperience(
   profile.years_experience != null
-    ? String(profile.years_experience)
+    ? String(profile.years_experience): ''
+);
+// Loads the designer's saved phone number.
+setPhone(profile.phone ?? '');
+// Loads the designer's saved starting price.
+setStartingPrice(
+  profile.starting_price != null
+    ? String(profile.starting_price)
     : ''
 );
       }
@@ -150,18 +162,25 @@ const saveProfile = async () => {
   // Updates the logged-in designer's profile.
   const { error } = await supabase
     .from('profiles')
-    .update({
-  // Saves the editable designer profile fields.
+   .update({
   name: name.trim(),
   bio: bio.trim(),
   location: location.trim(),
   instagram: instagram.trim(),
+  years_experience:
+    yearsExperience.trim() === ''
+      ? null
+      : Number(yearsExperience),
+
+  // Saves the designer's private phone number.
+  phone: phone.trim(),
+
   avatar_url: finalAvatarUrl || null,
-  // Saves the number of years as a numeric value.
-years_experience:
-  yearsExperience.trim() === ''
+  // Saves the designer's starting price as a numeric value.
+starting_price:
+  startingPrice.trim() === ''
     ? null
-    : Number(yearsExperience),
+    : Number(startingPrice),
 })
     .eq('id', user.id);
 
@@ -235,7 +254,22 @@ years_experience:
   placeholder="e.g. 3"
   keyboardType="number-pad"
 />
-
+<Text style={styles.label}>PHONE</Text>
+<TextInput
+  value={phone}
+  onChangeText={setPhone}
+  style={styles.input}
+  placeholder="+353 87 123 4567"
+  keyboardType="phone-pad"
+/>
+<Text style={styles.label}>STARTING PRICE (€)</Text>
+<TextInput
+  value={startingPrice}
+  onChangeText={setStartingPrice}
+  style={styles.input}
+  placeholder="e.g. 35"
+  keyboardType="decimal-pad"
+/>
         {/* Saves the edited profile when the button is pressed. */}
 <Pressable
   style={styles.saveButton}
