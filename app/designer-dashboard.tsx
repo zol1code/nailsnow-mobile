@@ -4,11 +4,13 @@ import { Image } from 'expo-image';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import {
+  Alert,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
-  View,
+  TextInput,
+  View
 } from 'react-native';
 import { supabase } from '../lib/supabase';
 
@@ -48,6 +50,15 @@ const N = {
   n8: '1588359953494-0c215e3cedc6',
   n9: '1720343409646-960f6dcccae3',
 };
+// Represents a service created by a designer in Supabase.
+type DesignerService = {
+  id: number;
+  designer_id: string;
+  name: string;
+  description: string | null;
+  price: number;
+  duration_minutes: number;
+};
 
 type RequestStatus = 'pending' | 'confirmed';
 
@@ -75,7 +86,118 @@ const handleLogout = async () => {
 
 router.replace('/auth');
 };
+// Saves a new designer service in Supabase.
+const saveService = async () => {
+  // Prevents saving a service without the required information.
+  if (
+    !newServiceName.trim() ||
+    !newServicePrice.trim() ||
+    !newServiceDuration.trim()
+  ) {
+    console.log('Please complete the required service fields.');
+    return;
+  }
+
+  const price = Number(
+    newServicePrice.replace(',', '.')
+  );
+
+  const duration = Number(newServiceDuration);
+
+  // Makes sure price and duration contain valid numbers.
+  if (
+    Number.isNaN(price) ||
+    price < 0 ||
+    !Number.isInteger(duration) ||
+    duration <= 0
+  ) {
+    console.log('Invalid service price or duration.');
+    return;
+  }
+
+  // Gets the currently logged-in designer.
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    console.log('Save service error: user not logged in');
+    return;
+  }
+
+  // Creates the service in the designer_services table.
+  const { data: createdService, error } = await supabase
+    .from('designer_services')
+    .insert({
+      designer_id: user.id,
+      name: newServiceName.trim(),
+      description:
+        newServiceDescription.trim() || null,
+      price,
+      duration_minutes: duration,
+    })
+    .select(
+      'id, designer_id, name, description, price, duration_minutes'
+    )
+    .single();
+
+  if (error) {
+    console.log('Save service error:', error.message);
+    return;
+  }
+
+  // Immediately displays the newly created service.
+  setServices((prev) => [
+    ...prev,
+    createdService as DesignerService,
+  ]);
+
+  // Clears and closes the form after saving successfully.
+  setNewServiceName('');
+  setNewServiceDescription('');
+  setNewServicePrice('');
+  setNewServiceDuration('');
+  setShowAddService(false);
+};
+// Deletes one of the logged-in designer's services from Supabase.
+const deleteService = async (serviceId: number) => {
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    console.log('Delete service error: user not logged in');
+    return;
+  }
+
+  // Deletes the service only when it belongs to the logged-in designer.
+  const { error } = await supabase
+    .from('designer_services')
+    .delete()
+    .eq('id', serviceId)
+    .eq('designer_id', user.id);
+
+  if (error) {
+    console.log('Delete service error:', error.message);
+    return;
+  }
+
+  // Removes the deleted service from the screen immediately.
+  setServices((prev) =>
+    prev.filter((service) => service.id !== serviceId)
+  );
+};
   const [tab, setTab] = useState('Overview');
+  // Stores the logged-in designer's services loaded from Supabase.
+const [services, setServices] = useState<DesignerService[]>([]);
+// Controls whether the Add Service form is visible.
+const [showAddService, setShowAddService] = useState(false);
+
+// Stores the information entered in the new service form.
+const [newServiceName, setNewServiceName] = useState('');
+const [newServiceDescription, setNewServiceDescription] = useState('');
+const [newServicePrice, setNewServicePrice] = useState('');
+const [newServiceDuration, setNewServiceDuration] = useState('');
   // Stores the logged-in designer's real profile from Supabase.
 const [designerProfile, setDesignerProfile] = useState<{
   name: string | null;
@@ -110,6 +232,25 @@ useFocusEffect(
       }
 
       setDesignerProfile(profile);
+      // Loads all services that belong to the currently logged-in designer.
+const { data: designerServices, error: servicesError } =
+  await supabase
+    .from('designer_services')
+    .select(
+      'id, designer_id, name, description, price, duration_minutes'
+    )
+    .eq('designer_id', user.id)
+    .order('created_at', { ascending: true });
+
+if (servicesError) {
+  console.log(
+    'Designer services error:',
+    servicesError.message
+  );
+  return;
+}
+
+setServices(designerServices ?? []);
     };
 
     loadDesignerProfile();
@@ -309,8 +450,13 @@ const [editingTime, setEditingTime] = useState<{
   type: 'start' | 'end';
 } | null>(null);
 
-  const tabs = ['Overview', 'Portfolio', 'Schedule', 'Requests'];
-
+const tabs = [
+  'Overview',
+  'Services',
+  'Portfolio',
+  'Schedule',
+  'Requests',
+];
   const stats = [
     {
       label: 'This Month',
@@ -742,6 +888,204 @@ useEffect(() => {
           </>
         )}
 
+{/* Shows the services created by the logged-in designer. */}
+{tab === 'Services' && (
+  <View>
+    <View style={styles.servicesHeader}>
+      <View>
+        <Text style={styles.servicesTitle}>
+          My Services
+        </Text>
+
+        <Text style={styles.servicesSubtitle}>
+          Manage the services clients can book.
+        </Text>
+      </View>
+
+<Pressable
+  style={styles.addServiceButton}
+  onPress={() => setShowAddService((prev) => !prev)}
+>
+  <Ionicons
+          name="add"
+          size={16}
+          color="#FFFFFF"
+        />
+
+        <Text style={styles.addServiceButtonText}>
+          Add Service
+        </Text>
+      </Pressable>
+    </View>
+    {/* Form used to create a new designer service. */}
+{showAddService && (
+  <View style={styles.addServiceForm}>
+    <Text style={styles.formLabel}>
+      Service Name
+    </Text>
+
+    <TextInput
+      style={styles.serviceInput}
+      value={newServiceName}
+      onChangeText={setNewServiceName}
+      placeholder="e.g. Gel Extensions"
+      placeholderTextColor={COLORS.mutedForeground}
+    />
+
+    <Text style={styles.formLabel}>
+      Description
+    </Text>
+
+    <TextInput
+      style={[
+        styles.serviceInput,
+        styles.serviceDescriptionInput,
+      ]}
+      value={newServiceDescription}
+      onChangeText={setNewServiceDescription}
+      placeholder="Describe this service"
+      placeholderTextColor={COLORS.mutedForeground}
+      multiline
+    />
+
+    <View style={styles.serviceFormRow}>
+      <View style={styles.serviceFormColumn}>
+        <Text style={styles.formLabel}>
+          Price (€)
+        </Text>
+
+        <TextInput
+          style={styles.serviceInput}
+          value={newServicePrice}
+          onChangeText={setNewServicePrice}
+          placeholder="45"
+          placeholderTextColor={COLORS.mutedForeground}
+          keyboardType="decimal-pad"
+        />
+      </View>
+
+      <View style={styles.serviceFormColumn}>
+        <Text style={styles.formLabel}>
+          Duration (min)
+        </Text>
+
+        <TextInput
+          style={styles.serviceInput}
+          value={newServiceDuration}
+          onChangeText={setNewServiceDuration}
+          placeholder="60"
+          placeholderTextColor={COLORS.mutedForeground}
+          keyboardType="number-pad"
+        />
+      </View>
+    </View>
+
+    <View style={styles.serviceFormButtons}>
+      <Pressable
+        style={styles.cancelServiceButton}
+        onPress={() => setShowAddService(false)}
+      >
+        <Text style={styles.cancelServiceButtonText}>
+          Cancel
+        </Text>
+      </Pressable>
+
+<Pressable
+  style={styles.saveServiceButton}
+  onPress={saveService}
+>
+  <Text style={styles.saveServiceButtonText}>
+          Save Service
+        </Text>
+      </Pressable>
+    </View>
+  </View>
+)}
+
+    {services.length === 0 ? (
+      <View style={styles.emptyServices}>
+        <Ionicons
+          name="sparkles-outline"
+          size={28}
+          color={COLORS.primary}
+        />
+
+        <Text style={styles.emptyServicesTitle}>
+          No services yet
+        </Text>
+
+        <Text style={styles.emptyServicesText}>
+          Add your first nail service so clients can book with you.
+        </Text>
+      </View>
+    ) : (
+      <View style={styles.servicesList}>
+        {services.map((service) => (
+          <View
+            key={service.id}
+            style={styles.serviceCard}
+          >
+            <View style={styles.serviceInfo}>
+              <Text style={styles.serviceName}>
+                {service.name}
+              </Text>
+
+              {service.description && (
+                <Text style={styles.serviceDescription}>
+                  {service.description}
+                </Text>
+              )}
+
+              <View style={styles.serviceDurationRow}>
+                <Ionicons
+                  name="time-outline"
+                  size={14}
+                  color={COLORS.mutedForeground}
+                />
+
+                <Text style={styles.serviceDuration}>
+                  {service.duration_minutes} min
+                </Text>
+              </View>
+            </View>
+
+            <View style={styles.serviceRight}>
+  <Text style={styles.servicePrice}>
+    €{Number(service.price).toFixed(2)}
+  </Text>
+
+  <Pressable
+    style={styles.deleteServiceButton}
+onPress={() =>
+  Alert.alert(
+    'Delete Service',
+    `Are you sure you want to delete "${service.name}"?`,
+    [
+      {
+        text: 'Cancel',
+        style: 'cancel',
+      },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: () => deleteService(service.id),
+      },
+    ]
+  )
+}  >
+    <Ionicons
+      name="trash-outline"
+      size={17}
+      color="#DC2626"
+    />
+  </Pressable>
+</View>
+          </View>
+        ))}
+      </View>
+    )}
+  </View>
+)}
         {tab === 'Portfolio' && (
           <>
             <View style={styles.portfolioHeader}>
@@ -1752,5 +2096,218 @@ notificationBadgeText: {
   fontSize: 10,
   fontWeight: '700',
   color: '#FFFFFF',
+},
+
+// Header of the designer services section.
+servicesHeader: {
+  flexDirection: 'row',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  marginBottom: 20,
+},
+
+servicesTitle: {
+  fontSize: 20,
+  fontFamily: 'serif',
+  color: COLORS.foreground,
+},
+
+servicesSubtitle: {
+  marginTop: 4,
+  fontSize: 12,
+  color: COLORS.mutedForeground,
+},
+
+// Button used to create a new service.
+addServiceButton: {
+  flexDirection: 'row',
+  alignItems: 'center',
+  gap: 6,
+  paddingHorizontal: 14,
+  paddingVertical: 10,
+  borderRadius: 12,
+  backgroundColor: COLORS.primary,
+},
+
+addServiceButtonText: {
+  fontSize: 12,
+  fontWeight: '700',
+  color: '#FFFFFF',
+},
+
+// Empty state shown before the designer creates any services.
+emptyServices: {
+  alignItems: 'center',
+  paddingVertical: 40,
+  paddingHorizontal: 24,
+  borderRadius: 16,
+  borderWidth: 1,
+  borderColor: COLORS.border,
+  backgroundColor: COLORS.card,
+},
+
+emptyServicesTitle: {
+  marginTop: 12,
+  fontSize: 16,
+  fontWeight: '700',
+  color: COLORS.foreground,
+},
+
+emptyServicesText: {
+  marginTop: 6,
+  maxWidth: 260,
+  textAlign: 'center',
+  fontSize: 12,
+  lineHeight: 18,
+  color: COLORS.mutedForeground,
+},
+
+// List containing all services loaded from Supabase.
+servicesList: {
+  gap: 10,
+},
+
+serviceCard: {
+  flexDirection: 'row',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  padding: 16,
+  borderRadius: 16,
+  borderWidth: 1,
+  borderColor: COLORS.border,
+  backgroundColor: COLORS.card,
+},
+
+serviceInfo: {
+  flex: 1,
+  marginRight: 16,
+},
+
+serviceName: {
+  fontSize: 14,
+  fontWeight: '700',
+  color: COLORS.foreground,
+},
+
+serviceDescription: {
+  marginTop: 4,
+  fontSize: 12,
+  lineHeight: 17,
+  color: COLORS.mutedForeground,
+},
+
+serviceDurationRow: {
+  flexDirection: 'row',
+  alignItems: 'center',
+  gap: 5,
+  marginTop: 8,
+},
+
+serviceDuration: {
+  fontSize: 11,
+  color: COLORS.mutedForeground,
+},
+
+servicePrice: {
+  fontSize: 15,
+  fontWeight: '700',
+  color: COLORS.primary,
+},
+// Form used to create a new service.
+addServiceForm: {
+  marginBottom: 20,
+  padding: 16,
+  borderRadius: 16,
+  borderWidth: 1,
+  borderColor: COLORS.border,
+  backgroundColor: COLORS.card,
+},
+
+formLabel: {
+  marginBottom: 6,
+  fontSize: 12,
+  fontWeight: '700',
+  color: COLORS.foreground,
+},
+
+serviceInput: {
+  minHeight: 44,
+  marginBottom: 14,
+  paddingHorizontal: 12,
+  paddingVertical: 10,
+  borderRadius: 10,
+  borderWidth: 1,
+  borderColor: COLORS.border,
+  backgroundColor: COLORS.background,
+  fontSize: 13,
+  color: COLORS.foreground,
+},
+
+serviceDescriptionInput: {
+  minHeight: 80,
+  textAlignVertical: 'top',
+},
+
+serviceFormRow: {
+  flexDirection: 'row',
+  gap: 10,
+},
+
+serviceFormColumn: {
+  flex: 1,
+},
+
+serviceFormButtons: {
+  flexDirection: 'row',
+  gap: 10,
+  marginTop: 4,
+},
+
+cancelServiceButton: {
+  flex: 1,
+  alignItems: 'center',
+  justifyContent: 'center',
+  paddingVertical: 11,
+  borderRadius: 10,
+  borderWidth: 1,
+  borderColor: COLORS.border,
+},
+
+cancelServiceButtonText: {
+  fontSize: 12,
+  fontWeight: '700',
+  color: COLORS.mutedForeground,
+},
+
+saveServiceButton: {
+  flex: 1,
+  alignItems: 'center',
+  justifyContent: 'center',
+  paddingVertical: 11,
+  borderRadius: 10,
+  backgroundColor: COLORS.primary,
+},
+
+saveServiceButtonText: {
+  fontSize: 12,
+  fontWeight: '700',
+  color: '#FFFFFF',
+},
+// Holds the service price and action buttons.
+serviceRight: {
+  alignItems: 'flex-end',
+  gap: 10,
+},
+
+// Button used to delete one of the designer's services.
+deleteServiceButton: {
+  width: 32,
+  height: 32,
+  borderRadius: 10,
+  alignItems: 'center',
+  justifyContent: 'center',
+  borderWidth: 1,
+  borderColor: '#FECACA',
+  backgroundColor: '#FEF2F2',
 },
 });
