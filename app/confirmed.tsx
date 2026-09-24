@@ -63,6 +63,32 @@ const DESIGNERS = [
   },
 ];
 
+// Converts YYYY-MM-DD into a friendly date for the customer.
+function formatAppointmentDate(value: string) {
+  if (!value) return '';
+
+  const [year, month, day] = value.split('-').map(Number);
+
+  const date = new Date(year, month - 1, day);
+
+  return date.toLocaleDateString('en-IE', {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+  });
+}
+
+// Converts PostgreSQL time (14:00:00) into 2:00 PM.
+function formatAppointmentTime(value: string) {
+  if (!value) return '';
+
+  const [hours, minutes] = value.split(':').map(Number);
+
+  const period = hours >= 12 ? 'PM' : 'AM';
+  const displayHour = hours % 12 || 12;
+
+  return `${displayHour}:${String(minutes).padStart(2, '0')} ${period}`;
+}
 export default function ConfirmedScreen() {
   const params = useLocalSearchParams();
 
@@ -157,8 +183,8 @@ const duration = Number(params.duration ?? 0);
             </Text>
 
             <Text style={styles.detailValue}>
-              {service}
-            </Text>
+  {formatAppointmentDate(date)} at {formatAppointmentTime(time)}
+</Text>
           </View>
 
           <View style={styles.detailRow}>

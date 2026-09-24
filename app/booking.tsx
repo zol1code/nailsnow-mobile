@@ -20,6 +20,7 @@ const COLORS = {
 };
 
 type Service = {
+  id: number;
   name: string;
   duration: number;
   price: number;
@@ -82,24 +83,42 @@ const DESIGNERS = [
   },
 ];
 
-const DAYS = [
-  'Mon Aug 25',
-  'Tue Aug 26',
-  'Wed Aug 27',
-  'Thu Aug 28',
-  'Fri Aug 29',
-  'Sat Aug 30',
-];
+// Generates the next 7 available calendar days dynamically.
+const DAYS = Array.from({ length: 7 }, (_, index) => {
+  const date = new Date();
 
+  // Starts with today and generates the following days.
+  date.setDate(date.getDate() + index);
+
+  return {
+    // Used only for displaying the date to the customer.
+    label: date.toLocaleDateString('en-IE', {
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric',
+    }),
+
+    // ISO date sent to Supabase, e.g. 2026-09-24.
+    value: [
+      date.getFullYear(),
+      String(date.getMonth() + 1).padStart(2, '0'),
+      String(date.getDate()).padStart(2, '0'),
+    ].join('-'),
+  };
+});
+
+// Appointment times.
+// label = what the customer sees.
+// value = PostgreSQL-compatible time sent to Supabase.
 const TIME_SLOTS = [
-  '9:00 AM',
-  '10:00 AM',
-  '11:00 AM',
-  '12:00 PM',
-  '2:00 PM',
-  '3:00 PM',
-  '4:00 PM',
-  '5:00 PM',
+  { label: '9:00 AM', value: '09:00:00' },
+  { label: '10:00 AM', value: '10:00:00' },
+  { label: '11:00 AM', value: '11:00:00' },
+  { label: '12:00 PM', value: '12:00:00' },
+  { label: '2:00 PM', value: '14:00:00' },
+  { label: '3:00 PM', value: '15:00:00' },
+  { label: '4:00 PM', value: '16:00:00' },
+  { label: '5:00 PM', value: '17:00:00' },
 ];
 
 export default function BookingScreen() {
@@ -164,15 +183,21 @@ useEffect(() => {
 
     router.push({
       pathname: '/payment',
-      params: {
-        id: designerId,
-        service: service.name,
-        price: service.price.toString(),
-        // Passes the service duration to the payment and confirmation flow
-duration: service.duration.toString(),
-        date,
-        time,
-      },
+     params: {
+  id: designerId,
+
+  // ID of the real service in designer_services.
+  serviceId: service.id.toString(),
+
+  service: service.name,
+  price: service.price.toString(),
+
+  // Passes the service duration to the payment flow.
+  duration: service.duration.toString(),
+
+  date,
+  time,
+},
     });
   }
 
@@ -221,13 +246,14 @@ duration: service.duration.toString(),
         styles.serviceCard,
         selected && styles.serviceCardSelected,
       ]}
-      onPress={() =>
-        setService({
-          name: item.name,
-          price: Number(item.price),
-          duration: item.duration_minutes,
-        })
-      }
+    onPress={() =>
+  setService({
+    id: item.id,
+    name: item.name,
+    price: Number(item.price),
+    duration: item.duration_minutes,
+  })
+}
     >
       <View>
         <Text style={styles.serviceName}>
@@ -266,39 +292,44 @@ duration: service.duration.toString(),
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={styles.dateRow}
           >
-            {DAYS.map((item) => {
-              const [day, ...rest] = item.split(' ');
-              const selected = date === item;
+           {DAYS.map((item) => {
+  // Separates the visual label into weekday and date.
+  const labelParts = item.label.replace(',', '').split(' ');
+  const day = labelParts[0];
+  const rest = labelParts.slice(1).join(' ');
 
-              return (
-                <Pressable
-                  key={item}
-                  style={[
-                    styles.dateCard,
-                    selected && styles.dateCardSelected,
-                  ]}
-                  onPress={() => setDate(item)}
-                >
-                  <Text
-                    style={[
-                      styles.dateDay,
-                      selected && styles.dateTextSelected,
-                    ]}
-                  >
-                    {day}
-                  </Text>
+  // The selected value is the ISO date stored in item.value.
+  const selected = date === item.value;
 
-                  <Text
-                    style={[
-                      styles.dateNumber,
-                      selected && styles.dateTextSelected,
-                    ]}
-                  >
-                    {rest.join(' ')}
-                  </Text>
-                </Pressable>
-              );
-            })}
+  return (
+    <Pressable
+      key={item.value}
+      style={[
+        styles.dateCard,
+        selected && styles.dateCardSelected,
+      ]}
+      onPress={() => setDate(item.value)}
+    >
+      <Text
+        style={[
+          styles.dateDay,
+          selected && styles.dateTextSelected,
+        ]}
+      >
+        {day}
+      </Text>
+
+      <Text
+        style={[
+          styles.dateNumber,
+          selected && styles.dateTextSelected,
+        ]}
+      >
+        {rest}
+      </Text>
+    </Pressable>
+  );
+})}
           </ScrollView>
         </View>
 
@@ -308,29 +339,32 @@ duration: service.duration.toString(),
           </Text>
 
           <View style={styles.timeGrid}>
-            {TIME_SLOTS.map((item) => {
-              const selected = time === item;
+  {TIME_SLOTS.map((item) => {
+    // Compares the PostgreSQL-compatible time value.
+    const selected = time === item.value;
 
-              return (
-                <Pressable
-                  key={item}
-                  style={[
-                    styles.timeButton,
-                    selected && styles.timeButtonSelected,
-                  ]}
-                  onPress={() => setTime(item)}
-                >
-                  <Text
-                    style={[
-                      styles.timeText,
-                      selected && styles.timeTextSelected,
-                    ]}
-                  >
-                    {item}
-                  </Text>
-                </Pressable>
-              );
-            })}
+    return (
+      <Pressable
+        key={item.value}
+        style={[
+          styles.timeButton,
+          selected && styles.timeButtonSelected,
+        ]}
+        // Stores the database-compatible time.
+        onPress={() => setTime(item.value)}
+      >
+        <Text
+          style={[
+            styles.timeText,
+            selected && styles.timeTextSelected,
+          ]}
+        >
+          {/* Shows the friendly time to the customer. */}
+          {item.label}
+        </Text>
+      </Pressable>
+    );
+  })}
           </View>
         </View>
       </ScrollView>
@@ -344,9 +378,11 @@ duration: service.duration.toString(),
               </Text>
 
               <Text style={styles.summaryDetails}>
-                {date}
-                {time ? ` · ${time}` : ''}
-              </Text>
+  {DAYS.find((item) => item.value === date)?.label ?? date}
+  {time
+    ? ` · ${TIME_SLOTS.find((item) => item.value === time)?.label ?? time}`
+    : ''}
+</Text>
             </View>
 
             <Text style={styles.summaryPrice}>

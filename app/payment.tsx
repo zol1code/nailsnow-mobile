@@ -62,6 +62,32 @@ const DESIGNERS = [
     avatar: img(P.a5),
   },
 ];
+// Converts YYYY-MM-DD into a friendly date for the customer.
+function formatAppointmentDate(value: string) {
+  if (!value) return '';
+
+  const [year, month, day] = value.split('-').map(Number);
+
+  const date = new Date(year, month - 1, day);
+
+  return date.toLocaleDateString('en-IE', {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+  });
+}
+
+// Converts PostgreSQL time (14:00:00) into 2:00 PM.
+function formatAppointmentTime(value: string) {
+  if (!value) return '';
+
+  const [hours, minutes] = value.split(':').map(Number);
+
+  const period = hours >= 12 ? 'PM' : 'AM';
+  const displayHour = hours % 12 || 12;
+
+  return `${displayHour}:${String(minutes).padStart(2, '0')} ${period}`;
+}
 
 export default function PaymentScreen() {
   const params = useLocalSearchParams();
@@ -102,6 +128,8 @@ useEffect(() => {
 
   loadDesigner();
 }, [designerId]);
+const serviceId = Number(params.serviceId ?? 0);
+
   const service = String(params.service ?? '');
   const price = Number(params.price ?? 0);
   // Receives the service duration from the booking screen
@@ -134,20 +162,63 @@ const duration = Number(params.duration ?? 0);
     return numbers;
   }
 
-  function confirmBooking() {
-    router.push({
-      pathname: '/confirmed',
-      params: {
-        id: designerId,
-        service,
-        price: price.toString(),
-        // Passes the service duration to the confirmation screen
-duration: duration.toString(),
-        date,
-        time,
-      },
-    });
+  async function confirmBooking() {
+  // Gets the customer currently logged into the app.
+  const {
+    data: { user },
+    error: userError,
+  } = await supabase.auth.getUser();
+
+  if (userError || !user) {
+    console.log(
+      'Create appointment error: customer not logged in'
+    );
+    return;
   }
+
+  // Creates the real appointment in Supabase.
+  const { data: createdAppointment, error } = await supabase
+    .from('appointments')
+    .insert({
+      customer_id: user.id,
+      designer_id: designerId,
+      service_id: serviceId,
+      service_name: service,
+      price,
+      duration_minutes: duration,
+      appointment_date: date,
+      appointment_time: time,
+      status: 'pending',
+    })
+    .select('id')
+    .single();
+
+  if (error) {
+    console.log(
+      'Create appointment error:',
+      error.message
+    );
+    return;
+  }
+
+  // Opens the confirmation screen only after
+  // Supabase successfully creates the appointment.
+  router.push({
+    pathname: '/confirmed',
+    params: {
+      id: designerId,
+
+      // Real appointment ID created by Supabase.
+      appointmentId: createdAppointment.id,
+
+      service,
+      price: price.toString(),
+      duration: duration.toString(),
+      date,
+      time,
+    },
+  });
+}
 
   return (
     <View style={styles.container}>
@@ -193,8 +264,9 @@ duration: duration.toString(),
               {service}
             </Text>
 
-            <Text style={styles.appointmentInfo}>
-  {realDesigner?.name || designer.name} · {date} at {time}
+           <Text style={styles.appointmentInfo}>
+  {realDesigner?.name || designer.name} · {formatAppointmentDate(date)} at{' '}
+  {formatAppointmentTime(time)}
 </Text>
           </View>
 

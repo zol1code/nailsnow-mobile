@@ -1,9 +1,9 @@
 import { Ionicons } from '@expo/vector-icons';
+import { supabase } from '../lib/supabase';
 // Stores appointments locally so they remain available after closing the app
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Stores appointments locally so they remain available after closing the app
-import { Image } from 'expo-image';
 import {
   router,
   useFocusEffect,
@@ -78,8 +78,79 @@ type CustomerAppointment = {
   date: string;
   time: string;
 };
+// Represents an appointment loaded from Supabase.
+type RealAppointment = {
+  id: string;
+  customer_id: string;
+  designer_id: string;
+  service_id: string | null;
+  service_name: string;
+  price: number;
+  duration_minutes: number;
+  appointment_date: string;
+  appointment_time: string;
+  status:
+    | 'pending'
+    | 'confirmed'
+    | 'in_progress'
+    | 'completed'
+    | 'cancelled'
+    | 'disputed';
+  created_at: string;
+};
 export default function AppointmentsScreen() {
   const params = useLocalSearchParams();
+    // Appointments loaded from the real Supabase database.
+  const [realAppointments, setRealAppointments] =
+    useState<RealAppointment[]>([]);
+
+  // Controls the loading state while Supabase is being queried.
+  const [loadingAppointments, setLoadingAppointments] =
+    useState(true);
+  
+    // Loads the logged-in customer's appointments from Supabase.
+async function loadRealAppointments() {
+  try {
+    setLoadingAppointments(true);
+
+    // Gets the currently logged-in customer.
+    const {
+      data: { user },
+      error: userError,
+    } = await supabase.auth.getUser();
+
+    if (userError) {
+      console.log('Get user error:', userError.message);
+      return;
+    }
+
+    if (!user) {
+      console.log('No logged-in user found.');
+      return;
+    }
+
+    // Loads only appointments that belong to this customer.
+    const { data, error } = await supabase
+      .from('appointments')
+      .select('*')
+      .eq('customer_id', user.id)
+      .order('appointment_date', { ascending: true })
+      .order('appointment_time', { ascending: true });
+
+    if (error) {
+      console.log('Appointments load error:', error.message);
+      return;
+    }
+
+    console.log('REAL APPOINTMENTS FROM SUPABASE:', data);
+
+    setRealAppointments((data ?? []) as RealAppointment[]);
+  } catch (error) {
+    console.log('Unexpected appointments error:', error);
+  } finally {
+    setLoadingAppointments(false);
+  }
+}
 // Stores appointment data loaded from the device.
 // It will be used when the screen is opened without route parameters.
 // Stores one appointment loaded from the device
@@ -107,6 +178,12 @@ const getAppointmentKey = (appointment: CustomerAppointment) =>
 
 // Loads a previously saved appointment when this screen opens.
 // This allows the appointment to remain available after closing the app.
+// Loads real appointments from Supabase when this screen opens.
+useEffect(() => {
+  loadRealAppointments();
+}, []);
+
+// Old local AsyncStorage system - kept temporarily during migration.
 
  useEffect(() => {
   const loadSavedAppointment = async () => {
@@ -288,9 +365,7 @@ setSavedAppointment(appointmentToSave);
 
  // Checks whether the customer has at least one appointment.
 // It supports both the old single-booking flow and the new appointments list.
-const hasAppointment =
-  appointments.length > 0 ||
-  Boolean(designerId && service && date && time);
+const hasAppointment = realAppointments.length > 0;
 
   // Uses the first appointment from the new list when available.
 // Falls back to the old single-appointment flow while the migration is in progress.
@@ -374,14 +449,12 @@ const getDesignerForAppointment = (
           </View>
         ) : (
          <>
-  {appointments.map((appointment, index) => {
-    // Finds the correct nail artist for this specific appointment
-    const appointmentDesigner =
-      getDesignerForAppointment(appointment);
+{realAppointments.map((appointment, index) => {    // Finds the correct nail artist for this specific appointment
+  
 
     return (
       <View
-        key={`${appointment.designerId}-${appointment.date}-${appointment.time}-${index}`}
+        key={appointment.id}
         style={styles.card}
       >
         <View style={styles.statusRow}>
@@ -389,10 +462,16 @@ const getDesignerForAppointment = (
             <View style={styles.statusDot} />
 
            <Text style={styles.confirmedText}>
-  {appointmentStatuses[getAppointmentKey(appointment)] === 'accepted'
-    ? 'Accepted'
-    : appointmentStatuses[getAppointmentKey(appointment)] === 'declined'
-    ? 'Declined'
+  {appointment.status === 'confirmed'
+    ? 'Confirmed'
+    : appointment.status === 'in_progress'
+    ? 'In Progress'
+    : appointment.status === 'completed'
+    ? 'Completed'
+    : appointment.status === 'cancelled'
+    ? 'Cancelled'
+    : appointment.status === 'disputed'
+    ? 'Disputed'
     : 'Pending'}
 </Text>
           </View>
@@ -403,19 +482,14 @@ const getDesignerForAppointment = (
         </View>
 
         <View style={styles.designerRow}>
-          <Image
-            source={appointmentDesigner.avatar}
-            style={styles.avatar}
-            contentFit="cover"
-          />
+      <View style={styles.avatar} />
 
-          <View>
-            <Text style={styles.designerName}>
-              {appointmentDesigner.name}
-            </Text>
-
+<View>
+  <Text style={styles.designerName}>
+    Nail artist
+  </Text>
             <Text style={styles.serviceName}>
-              {appointment.service}
+              {appointment.service_name}
             </Text>
           </View>
         </View>
@@ -427,7 +501,7 @@ const getDesignerForAppointment = (
             </Text>
 
             <Text style={styles.infoValue}>
-              {appointment.date}
+              {appointment.appointment_date}
             </Text>
           </View>
 
@@ -437,137 +511,23 @@ const getDesignerForAppointment = (
             </Text>
 
             <Text style={styles.infoValue}>
-              {appointment.time}
+              {appointment.appointment_time}
             </Text>
           </View>
         </View>
 
         <View style={styles.actions}>
-          <Pressable
-            style={styles.chatButton}
-            onPress={() =>
-              router.push({
-                pathname: '/chat',
-                params: {
-                  id: appointmentDesigner.id.toString(),
-                },
-              })
-            }
-          >
-            <Text style={styles.chatButtonText}>
-              Chat with Artist
-            </Text>
-          </Pressable>
+          <Pressable style={styles.chatButton} disabled>
+  <Text style={styles.chatButtonText}>
+    Chat coming soon
+  </Text>
+</Pressable>
 
-          <Pressable
-            style={styles.cancelButton}
-            onPress={async () => {
-  // Creates a new list without the appointment the customer cancelled
-  const updatedAppointments = appointments.filter(
-    (_, appointmentIndex) => appointmentIndex !== index
-  );
-
-  // Saves the updated appointments list on the device
-  await AsyncStorage.setItem(
-    'customerAppointments',
-    JSON.stringify(updatedAppointments)
-  );
-
-  // Updates the screen immediately
-  setAppointments(updatedAppointments);
-
-  // Removes only the status connected to the cancelled appointment
-const appointmentKey = getAppointmentKey(appointment);
-
-// Creates the same request ID used by the Designer Dashboard.
-// This allows us to remove old Accept/Decline actions for this booking.
-const designerRequestId = `customer-${appointmentKey}`;
-
-// Loads the designer's saved accepted and declined requests.
-const savedAcceptedRequests = await AsyncStorage.getItem(
-  'acceptedRequests'
-);
-
-const savedDeclinedRequests = await AsyncStorage.getItem(
-  'declinedRequests'
-);
-
-// Removes this cancelled booking from the accepted requests history.
-if (savedAcceptedRequests) {
-  const acceptedRequests = JSON.parse(savedAcceptedRequests);
-
-  const updatedAcceptedRequests = acceptedRequests.filter(
-    (requestId: string) => requestId !== designerRequestId
-  );
-
-  await AsyncStorage.setItem(
-    'acceptedRequests',
-    JSON.stringify(updatedAcceptedRequests)
-  );
-}
-
-// Removes this cancelled booking from the declined requests history.
-if (savedDeclinedRequests) {
-  const declinedRequests = JSON.parse(savedDeclinedRequests);
-
-  const updatedDeclinedRequests = declinedRequests.filter(
-    (requestId: string) => requestId !== designerRequestId
-  );
-
-  await AsyncStorage.setItem(
-    'declinedRequests',
-    JSON.stringify(updatedDeclinedRequests)
-  );
-}
-
-const savedStatuses = await AsyncStorage.getItem(
-  'customerAppointmentStatuses'
-);
-
-if (savedStatuses) {
-  const currentStatuses = JSON.parse(savedStatuses);
-
-  // Removes this appointment from the status object
-  delete currentStatuses[appointmentKey];
-
-  // Saves the remaining appointment statuses
-  await AsyncStorage.setItem(
-    'customerAppointmentStatuses',
-    JSON.stringify(currentStatuses)
-  );
-
-  // Updates the status state on the screen immediately
-  setAppointmentStatuses(currentStatuses);
-}
-
-// Keeps the old single-appointment storage synchronized
-// while the app is transitioning to multiple appointments.
-if (updatedAppointments.length === 0) {
-  // If there are no appointments left, clear the old compatibility storage.
-  await AsyncStorage.removeItem('customerAppointment');
-  await AsyncStorage.removeItem('customerAppointmentStatus');
-
-  setSavedAppointment(null);
-  setAppointmentStatus('pending');
-} else {
-  // If other appointments still exist, use the newest remaining appointment
-  // as the compatibility appointment instead of keeping a cancelled booking.
-  const newestRemainingAppointment =
-    updatedAppointments[updatedAppointments.length - 1];
-
-  await AsyncStorage.setItem(
-    'customerAppointment',
-    JSON.stringify(newestRemainingAppointment)
-  );
-
-  setSavedAppointment(newestRemainingAppointment);
-}
-}}
-          >
-            <Text style={styles.cancelButtonText}>
-              Cancel
-            </Text>
-          </Pressable>
+          <Pressable style={styles.cancelButton} disabled>
+  <Text style={styles.cancelButtonText}>
+    Cancellation coming soon
+  </Text>
+</Pressable>
         </View>
       </View>
     );
