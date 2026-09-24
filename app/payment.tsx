@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Pressable,
   ScrollView,
@@ -10,6 +10,8 @@ import {
   TextInput,
   View,
 } from 'react-native';
+// Supabase client used to load the real designer information.
+import { supabase } from '../lib/supabase';
 
 const COLORS = {
   background: '#FDF5EF',
@@ -64,11 +66,42 @@ const DESIGNERS = [
 export default function PaymentScreen() {
   const params = useLocalSearchParams();
 
-  const designerId = Number(params.id ?? 1);
+// ID of the real designer received from the Booking screen.
+// Supabase designer IDs are UUID strings.
+const designerId = String(params.id ?? '');
 
-  const designer =
-    DESIGNERS.find((item) => item.id === designerId) ?? DESIGNERS[0];
+// Keeps the mock designer temporarily for the visual information
+// while the Payment screen is being migrated to Supabase.
+const designer = DESIGNERS[0];
+// Stores the real designer information loaded from Supabase.
+const [realDesigner, setRealDesigner] = useState<{
+  name: string | null;
+  avatar_url: string | null;
+} | null>(null);
 
+// Loads the real designer using the UUID received from Booking.
+useEffect(() => {
+  const loadDesigner = async () => {
+    if (!designerId) {
+      return;
+    }
+
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('name, avatar_url')
+      .eq('id', designerId)
+      .maybeSingle();
+
+    if (error) {
+      console.log('Payment designer error:', error.message);
+      return;
+    }
+
+    setRealDesigner(data);
+  };
+
+  loadDesigner();
+}, [designerId]);
   const service = String(params.service ?? '');
   const price = Number(params.price ?? 0);
   // Receives the service duration from the booking screen
@@ -105,7 +138,7 @@ const duration = Number(params.duration ?? 0);
     router.push({
       pathname: '/confirmed',
       params: {
-        id: designer.id.toString(),
+        id: designerId,
         service,
         price: price.toString(),
         // Passes the service duration to the confirmation screen
@@ -147,7 +180,7 @@ duration: duration.toString(),
       >
         <View style={styles.summaryCard}>
           <Image
-            source={designer.avatar}
+            source={realDesigner?.avatar_url || designer.avatar}
             style={styles.avatar}
             contentFit="cover"
           />
@@ -161,13 +194,13 @@ duration: duration.toString(),
             </Text>
 
             <Text style={styles.appointmentInfo}>
-              {designer.name} · {date} at {time}
-            </Text>
+  {realDesigner?.name || designer.name} · {date} at {time}
+</Text>
           </View>
 
           <Text style={styles.summaryPrice}>
-            ${price}
-          </Text>
+  €{price.toFixed(2)}
+</Text>
         </View>
 
         <View>

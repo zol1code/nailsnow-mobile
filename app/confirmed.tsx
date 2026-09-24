@@ -1,12 +1,14 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { router, useLocalSearchParams } from 'expo-router';
+import { useEffect, useState } from 'react';
 import {
   Pressable,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
+import { supabase } from '../lib/supabase';
 
 const COLORS = {
   background: '#FDF5EF',
@@ -64,11 +66,42 @@ const DESIGNERS = [
 export default function ConfirmedScreen() {
   const params = useLocalSearchParams();
 
-  const designerId = Number(params.id ?? 1);
+ // ID of the real designer received from the Payment screen.
+// Supabase designer IDs are UUID strings.
+const designerId = String(params.id ?? '');
 
-  const designer =
-    DESIGNERS.find((item) => item.id === designerId) ?? DESIGNERS[0];
+// Keeps the mock designer temporarily for visual information
+// while this screen is being migrated to Supabase.
+const designer = DESIGNERS[0];
+// Stores the real designer information loaded from Supabase.
+const [realDesigner, setRealDesigner] = useState<{
+  name: string | null;
+  avatar_url: string | null;
+} | null>(null);
 
+// Loads the real designer using the UUID received from Payment.
+useEffect(() => {
+  const loadDesigner = async () => {
+    if (!designerId) {
+      return;
+    }
+
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('name, avatar_url')
+      .eq('id', designerId)
+      .maybeSingle();
+
+    if (error) {
+      console.log('Confirmed designer error:', error.message);
+      return;
+    }
+
+    setRealDesigner(data);
+  };
+
+  loadDesigner();
+}, [designerId]);
   const service = String(params.service ?? '');
   const price = Number(params.price ?? 0);
   // Receives the service duration from the payment screen
@@ -95,20 +128,20 @@ const duration = Number(params.duration ?? 0);
       </Text>
 
       <Text style={styles.subtitle}>
-        Your appointment is confirmed. {designer.name} will see you soon!
+        Your appointment is confirmed. {realDesigner?.name || designer.name} will see you soon!
       </Text>
 
       <View style={styles.card}>
         <View style={styles.designerRow}>
           <Image
-            source={designer.avatar}
+            source={realDesigner?.avatar_url || designer.avatar}
             style={styles.avatar}
             contentFit="cover"
           />
 
           <View>
             <Text style={styles.designerName}>
-              {designer.name}
+             {realDesigner?.name || designer.name}
             </Text>
 
             <Text style={styles.specialty}>
@@ -153,9 +186,9 @@ const duration = Number(params.duration ?? 0);
               Total Paid
             </Text>
 
-            <Text style={styles.totalValue}>
-              ${total.toFixed(2)}
-            </Text>
+           <Text style={styles.totalValue}>
+  €{total.toFixed(2)}
+</Text>
           </View>
         </View>
       </View>
@@ -166,13 +199,13 @@ const duration = Number(params.duration ?? 0);
           onPress={() =>
             router.push({
               pathname: '/chat',
-              params: { id: designer.id.toString() },
+              params: { id: designerId },
             })
           }
         >
           <Text style={styles.messageText}>
-            Message {designer.name}
-          </Text>
+  Message {realDesigner?.name || designer.name}
+</Text>
         </Pressable>
 
        <Pressable
@@ -181,7 +214,7 @@ const duration = Number(params.duration ?? 0);
     router.push({
       pathname: '/appointments',
       params: {
-        id: designer.id.toString(),
+        id: designerId,
         service,
         date,
         time,

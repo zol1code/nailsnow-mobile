@@ -125,14 +125,44 @@ const saveService = async () => {
     return;
   }
 
-  // Creates the service in the designer_services table.
+  // If editingServiceId exists, updates the existing service.
+if (editingServiceId !== null) {
+  const { data: updatedService, error } = await supabase
+    .from('designer_services')
+    .update({
+      name: newServiceName.trim(),
+      description: newServiceDescription.trim() || null,
+      price,
+      duration_minutes: duration,
+    })
+    .eq('id', editingServiceId)
+    .eq('designer_id', user.id)
+    .select(
+      'id, designer_id, name, description, price, duration_minutes'
+    )
+    .single();
+
+  if (error) {
+    console.log('Update service error:', error.message);
+    return;
+  }
+
+  // Replaces the old service with the updated one on the screen.
+  setServices((prev) =>
+    prev.map((service) =>
+      service.id === editingServiceId
+        ? (updatedService as DesignerService)
+        : service
+    )
+  );
+} else {
+  // If no service is being edited, creates a new service.
   const { data: createdService, error } = await supabase
     .from('designer_services')
     .insert({
       designer_id: user.id,
       name: newServiceName.trim(),
-      description:
-        newServiceDescription.trim() || null,
+      description: newServiceDescription.trim() || null,
       price,
       duration_minutes: duration,
     })
@@ -151,13 +181,15 @@ const saveService = async () => {
     ...prev,
     createdService as DesignerService,
   ]);
+}
 
-  // Clears and closes the form after saving successfully.
-  setNewServiceName('');
-  setNewServiceDescription('');
-  setNewServicePrice('');
-  setNewServiceDuration('');
-  setShowAddService(false);
+// Clears the form after creating or editing a service.
+setNewServiceName('');
+setNewServiceDescription('');
+setNewServicePrice('');
+setNewServiceDuration('');
+setEditingServiceId(null);
+setShowAddService(false);
 };
 // Deletes one of the logged-in designer's services from Supabase.
 const deleteService = async (serviceId: number) => {
@@ -198,6 +230,10 @@ const [newServiceName, setNewServiceName] = useState('');
 const [newServiceDescription, setNewServiceDescription] = useState('');
 const [newServicePrice, setNewServicePrice] = useState('');
 const [newServiceDuration, setNewServiceDuration] = useState('');
+
+// Stores the ID of the service currently being edited.
+// Null means that the form is creating a new service.
+const [editingServiceId, setEditingServiceId] = useState<number | null>(null);
   // Stores the logged-in designer's real profile from Supabase.
 const [designerProfile, setDesignerProfile] = useState<{
   name: string | null;
@@ -904,8 +940,15 @@ useEffect(() => {
 
 <Pressable
   style={styles.addServiceButton}
-  onPress={() => setShowAddService((prev) => !prev)}
->
+onPress={() => {
+  // Starts a completely new service.
+  setEditingServiceId(null);
+  setNewServiceName('');
+  setNewServiceDescription('');
+  setNewServicePrice('');
+  setNewServiceDuration('');
+  setShowAddService((prev) => !prev);
+}}>
   <Ionicons
           name="add"
           size={16}
@@ -983,8 +1026,14 @@ useEffect(() => {
     <View style={styles.serviceFormButtons}>
       <Pressable
         style={styles.cancelServiceButton}
-        onPress={() => setShowAddService(false)}
-      >
+onPress={() => {
+  setEditingServiceId(null);
+  setNewServiceName('');
+  setNewServiceDescription('');
+  setNewServicePrice('');
+  setNewServiceDuration('');
+  setShowAddService(false);
+}}      >
         <Text style={styles.cancelServiceButtonText}>
           Cancel
         </Text>
@@ -994,9 +1043,9 @@ useEffect(() => {
   style={styles.saveServiceButton}
   onPress={saveService}
 >
-  <Text style={styles.saveServiceButtonText}>
-          Save Service
-        </Text>
+ <Text style={styles.saveServiceButtonText}>
+  {editingServiceId !== null ? 'Update Service' : 'Save Service'}
+</Text>
       </Pressable>
     </View>
   </View>
@@ -1053,6 +1102,29 @@ useEffect(() => {
   <Text style={styles.servicePrice}>
     €{Number(service.price).toFixed(2)}
   </Text>
+
+<Pressable
+  style={styles.editServiceButton}
+ onPress={() => {
+  // Stores which service is being edited.
+  setEditingServiceId(service.id);
+
+  // Fills the form with the current service information.
+  setNewServiceName(service.name);
+  setNewServiceDescription(service.description ?? '');
+  setNewServicePrice(String(service.price));
+  setNewServiceDuration(String(service.duration_minutes));
+
+  // Opens the service form.
+  setShowAddService(true);
+}}
+>
+  <Ionicons
+    name="create-outline"
+    size={17}
+    color={COLORS.primary}
+  />
+</Pressable>
 
   <Pressable
     style={styles.deleteServiceButton}
@@ -2297,6 +2369,17 @@ saveServiceButtonText: {
 serviceRight: {
   alignItems: 'flex-end',
   gap: 10,
+},
+// Button used to edit one of the designer's services.
+editServiceButton: {
+  width: 32,
+  height: 32,
+  borderRadius: 10,
+  alignItems: 'center',
+  justifyContent: 'center',
+  borderWidth: 1,
+  borderColor: '#DDD6FE',
+  backgroundColor: '#F5F3FF',
 },
 
 // Button used to delete one of the designer's services.

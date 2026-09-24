@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Pressable,
   ScrollView,
@@ -8,7 +8,7 @@ import {
   Text,
   View,
 } from 'react-native';
-
+import { supabase } from '../lib/supabase';
 const COLORS = {
   background: '#FDF5EF',
   foreground: '#1C0B12',
@@ -21,10 +21,9 @@ const COLORS = {
 
 type Service = {
   name: string;
-  duration: string;
+  duration: number;
   price: number;
 };
-
 const DESIGNERS = [
   {
     id: 1,
@@ -106,15 +105,56 @@ const TIME_SLOTS = [
 export default function BookingScreen() {
   const params = useLocalSearchParams();
 
-  const designerId = Number(params.id ?? 1);
+// ID received from the Designer Profile.
+// Real Supabase designer IDs are UUID strings.
+const designerId = String(params.id ?? '');
+console.log('BOOKING DESIGNER ID:', designerId);
+// Keeps the mock designer temporarily as a visual fallback
+// while the Booking screen is being migrated to Supabase.
+const designer = DESIGNERS[0];
 
-  const designer =
-    DESIGNERS.find((item) => item.id === designerId) ?? DESIGNERS[0];
+// Structure of a real service loaded from Supabase.
+type RealService = {
+  id: number;
+  name: string;
+  description: string | null;
+  price: number;
+  duration_minutes: number;
+};
 
   const [service, setService] = useState<Service | null>(null);
+  // Stores the real services of the selected designer.
+const [realServices, setRealServices] = useState<RealService[]>([]);
   const [date, setDate] = useState('');
   const [time, setTime] = useState('');
+// Loads the selected designer's real services from Supabase.
+useEffect(() => {
+  const loadDesignerServices = async () => {
+    if (!designerId) {
+      return;
+    }
 
+    const { data, error } = await supabase
+      .from('designer_services')
+      .select(
+        'id, name, description, price, duration_minutes'
+      )
+      .eq('designer_id', designerId)
+      .order('created_at', { ascending: true });
+
+    if (error) {
+      console.log(
+        'Booking services error:',
+        error.message
+      );
+      return;
+    }
+
+    setRealServices(data ?? []);
+  };
+
+  loadDesignerServices();
+}, [designerId]);
   const ready = Boolean(service && date && time);
 
   function continueToPayment() {
@@ -125,7 +165,7 @@ export default function BookingScreen() {
     router.push({
       pathname: '/payment',
       params: {
-        id: designer.id.toString(),
+        id: designerId,
         service: service.name,
         price: service.price.toString(),
         // Passes the service duration to the payment and confirmation flow
@@ -171,42 +211,48 @@ duration: service.duration.toString(),
           </Text>
 
           <View style={styles.serviceList}>
-            {designer.services.map((item) => {
-              const selected = service?.name === item.name;
+           {realServices.map((item) => {
+  const selected = service?.name === item.name;
 
-              return (
-                <Pressable
-                  key={item.name}
-                  style={[
-                    styles.serviceCard,
-                    selected && styles.serviceCardSelected,
-                  ]}
-                  onPress={() => setService(item)}
-                >
-                  <View>
-                    <Text style={styles.serviceName}>
-                      {item.name}
-                    </Text>
+  return (
+    <Pressable
+      key={item.id}
+      style={[
+        styles.serviceCard,
+        selected && styles.serviceCardSelected,
+      ]}
+      onPress={() =>
+        setService({
+          name: item.name,
+          price: Number(item.price),
+          duration: item.duration_minutes,
+        })
+      }
+    >
+      <View>
+        <Text style={styles.serviceName}>
+          {item.name}
+        </Text>
 
-                    <View style={styles.durationRow}>
-                      <Ionicons
-                        name="time-outline"
-                        size={13}
-                        color={COLORS.mutedForeground}
-                      />
+        <View style={styles.durationRow}>
+          <Ionicons
+            name="time-outline"
+            size={13}
+            color={COLORS.mutedForeground}
+          />
 
-                      <Text style={styles.durationText}>
-                        {item.duration}
-                      </Text>
-                    </View>
-                  </View>
+          <Text style={styles.durationText}>
+            {item.duration_minutes} min
+          </Text>
+        </View>
+      </View>
 
-                  <Text style={styles.price}>
-                    ${item.price}
-                  </Text>
-                </Pressable>
-              );
-            })}
+      <Text style={styles.price}>
+        €{Number(item.price).toFixed(2)}
+      </Text>
+    </Pressable>
+  );
+})}
           </View>
         </View>
 
@@ -304,8 +350,8 @@ duration: service.duration.toString(),
             </View>
 
             <Text style={styles.summaryPrice}>
-              ${service.price}
-            </Text>
+  €{Number(service.price).toFixed(2)}
+</Text>
           </View>
         )}
 

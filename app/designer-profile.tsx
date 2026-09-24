@@ -369,6 +369,18 @@ const [realProfile, setRealProfile] = useState<{
   years_experience: number | null;
   starting_price: number | null;
 } | null>(null);
+
+// Stores the real services created by this designer in Supabase.
+const [realServices, setRealServices] = useState<
+  {
+    id: number;
+    name: string;
+    description: string | null;
+    price: number;
+    duration_minutes: number;
+  }[]
+>([]);
+
 // Loads the real designer profile from Supabase.
 useEffect(() => {
   const loadRealProfile = async () => {
@@ -387,6 +399,24 @@ useEffect(() => {
     }
 
     setRealProfile(profile);
+    // Loads the services that belong to this designer.
+const { data: services, error: servicesError } = await supabase
+  .from('designer_services')
+  .select(
+    'id, name, description, price, duration_minutes'
+  )
+  .eq('designer_id', profileId)
+  .order('created_at', { ascending: true });
+
+if (servicesError) {
+  console.log(
+    'Public designer services error:',
+    servicesError.message
+  );
+  return;
+}
+
+setRealServices(services ?? []);
   };
 
   loadRealProfile();
@@ -541,35 +571,51 @@ useEffect(() => {
           )}
 
           {/* Services */}
-          {tab === 'Services' && (
-            <View style={styles.services}>
-              {designer.services.map((service, index) => (
-                <View key={index} style={styles.serviceCard}>
-                  <View>
-                    <Text style={styles.serviceName}>
-                      {service.name}
-                    </Text>
+          {/* Services loaded from Supabase for the selected designer. */}
+{tab === 'Services' && (
+  <View style={styles.services}>
+    {realServices.length === 0 ? (
+      <Text style={styles.noServicesText}>
+        No services available yet.
+      </Text>
+    ) : (
+      realServices.map((service) => (
+        <View
+          key={service.id}
+          style={styles.serviceCard}
+        >
+          <View style={{ flex: 1 }}>
+            <Text style={styles.serviceName}>
+              {service.name}
+            </Text>
 
-                    <View style={styles.durationRow}>
-                      <Ionicons
-                        name="time-outline"
-                        size={14}
-                        color={COLORS.mutedForeground}
-                      />
+            {service.description && (
+              <Text style={styles.serviceDescription}>
+                {service.description}
+              </Text>
+            )}
 
-                      <Text style={styles.duration}>
-                        {service.duration}
-                      </Text>
-                    </View>
-                  </View>
+            <View style={styles.durationRow}>
+              <Ionicons
+                name="time-outline"
+                size={14}
+                color={COLORS.mutedForeground}
+              />
 
-                  <Text style={styles.servicePrice}>
-                    ${service.price}
-                  </Text>
-                </View>
-              ))}
+              <Text style={styles.duration}>
+                {service.duration_minutes} min
+              </Text>
             </View>
-          )}
+          </View>
+
+          <Text style={styles.servicePrice}>
+            €{Number(service.price).toFixed(2)}
+          </Text>
+        </View>
+      ))
+    )}
+  </View>
+)}
 
           {/* Reviews */}
           {tab === 'Reviews' && (
@@ -655,8 +701,7 @@ useEffect(() => {
   onPress={() =>
     router.push({
       pathname: '/chat',
-      params: { id: designer.id.toString() },
-    })
+      params: { id: profileId },    })
   }
 >
           <Ionicons
@@ -673,7 +718,7 @@ useEffect(() => {
   onPress={() =>
     router.push({
       pathname: '/booking',
-      params: { id: designer.id.toString() },
+      params: { id: profileId },
     })
   }
 >
@@ -909,6 +954,23 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: COLORS.foreground,
   },
+
+  // Description of a real service loaded from Supabase.
+serviceDescription: {
+  marginTop: 4,
+  marginRight: 12,
+  fontSize: 12,
+  lineHeight: 17,
+  color: COLORS.mutedForeground,
+},
+
+// Message shown when the designer has not created services yet.
+noServicesText: {
+  paddingVertical: 24,
+  textAlign: 'center',
+  fontSize: 13,
+  color: COLORS.mutedForeground,
+},
 
   durationRow: {
     flexDirection: 'row',
