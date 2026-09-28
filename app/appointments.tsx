@@ -16,11 +16,12 @@ import {
 import { useCallback, useEffect, useState } from 'react';
 
 import {
+  Alert,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
-  View,
+  View
 } from 'react-native';
 
 const COLORS = {
@@ -482,39 +483,38 @@ const getDesignerForAppointment = (
           </View>
         ) : (
          <>
-{realAppointments.map((appointment, index) => {    // Finds the correct nail artist for this specific appointment
-  
-
-    return (
-      <View
-        key={appointment.id}
-        style={styles.card}
-      >
-        <View style={styles.statusRow}>
+{realAppointments.map((appointment, index) => {
+  // Finds the correct nail artist for this specific appointment
+  return (
+    <View key={appointment.id} style={styles.card}>
+      <View style={styles.statusRow}>
+        <View
+          style={[
+            styles.confirmedBadge,
+            (appointment.status === 'declined' ||
+              appointment.status === 'cancelled') && {
+              backgroundColor: '#FEE2E2',
+            },
+          ]}
+        >
           <View
-  style={[
-    styles.confirmedBadge,
-    appointment.status === 'declined' && {
-      backgroundColor: '#FEE2E2',
-    },
-  ]}
->
-            <View
-  style={[
-    styles.statusDot,
-    appointment.status === 'declined' && {
-      backgroundColor: '#DC2626',
-    },
-  ]}
-/>
-<Text
-  style={[
-    styles.confirmedText,
-    appointment.status === 'declined' && {
-      color: '#991B1B',
-    },
-  ]}
->
+            style={[
+              styles.statusDot,
+              (appointment.status === 'declined' ||
+                appointment.status === 'cancelled') && {
+                backgroundColor: '#DC2626',
+              },
+            ]}
+          />
+          <Text
+            style={[
+              styles.confirmedText,
+              (appointment.status === 'declined' ||
+                appointment.status === 'cancelled') && {
+                color: '#991B1B',
+              },
+            ]}
+          >
   {appointment.status === 'confirmed'
     ? 'Confirmed'
     : appointment.status === 'in_progress'
@@ -530,15 +530,10 @@ const getDesignerForAppointment = (
     : 'Pending'}
 </Text>
           </View>
-<Text style={styles.upcoming}>
-  {appointment.status === 'declined'
-    ? 'Declined'
-    : appointment.status === 'cancelled'
-    ? 'Cancelled'
-    : appointment.status === 'completed'
-    ? 'Completed'
-    : 'Upcoming'}
-</Text>
+{(appointment.status === 'pending' ||
+  appointment.status === 'confirmed') && (
+  <Text style={styles.upcoming}>Upcoming</Text>
+)}
         </View>
 
         <View style={styles.designerRow}>
@@ -605,9 +600,61 @@ const getDesignerForAppointment = (
   </Text>
 </Pressable>
 
-          <Pressable style={styles.cancelButton} disabled>
+         <Pressable
+  style={styles.cancelButton}
+  disabled={appointment.status !== 'pending'}
+  onPress={() => {
+    Alert.alert(
+      'Cancel appointment',
+      'Are you sure you want to cancel this appointment?',
+      [
+        { text: 'Keep appointment', style: 'cancel' },
+        {
+          text: 'Cancel appointment',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              // Confirma qual cliente está conectado.
+              const { data: { user }, error: userError } =
+                await supabase.auth.getUser();
+
+              if (userError || !user) {
+                Alert.alert('Error', 'Please log in again.');
+                return;
+              }
+
+              // Cancela somente este agendamento pendente do cliente.
+              const { data, error } = await supabase
+                .from('appointments')
+                .update({ status: 'cancelled' })
+                .eq('id', appointment.id)
+                .eq('customer_id', user.id)
+                .eq('status', 'pending')
+                .select('id')
+                .maybeSingle();
+
+              if (error || !data) {
+                Alert.alert(
+                  'Error',
+                  'Could not cancel this appointment. Please refresh and try again.'
+                );
+                return;
+              }
+
+              // Recarrega a lista para mostrar o novo status.
+              await loadRealAppointments();
+            } catch (error) {
+              console.log('Cancellation error:', error);
+              Alert.alert('Error', 'Could not cancel this appointment.');
+            }
+          },
+        },
+      ]
+    );
+  }}
+>
   <Text style={styles.cancelButtonText}>
-    Cancellation coming soon
+    {appointment.status === 'pending' ? 'Cancel' : 'Cancellation unavailable'}
   </Text>
 </Pressable>
         </View>
