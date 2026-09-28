@@ -1,17 +1,18 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
-    KeyboardAvoidingView,
-    Platform,
-    Pressable,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    View,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
 } from 'react-native';
+import { supabase } from '../lib/supabase';
 
 const COLORS = {
   background: '#FDF5EF',
@@ -36,7 +37,7 @@ const P = {
 };
 
 type Message = {
-  id: number;
+  id: string | number;
   sender: 'me' | 'them';
   text: string;
   time: string;
@@ -70,77 +71,119 @@ const DESIGNERS = [
   },
 ];
 
-const INITIAL_MESSAGES: Message[] = [
-  {
-    id: 1,
-    sender: 'them',
-    text: 'Hi! Thanks for reaching out. How can I help you? 💅',
-    time: '10:02 AM',
-  },
-  {
-    id: 2,
-    sender: 'me',
-    text: 'Hi Sofia! I wanted to ask about gel extensions — how long do they typically last?',
-    time: '10:05 AM',
-  },
-  {
-    id: 3,
-    sender: 'them',
-    text: 'With proper care, gel extensions last 3–4 weeks. I also offer fills when they grow out!',
-    time: '10:07 AM',
-  },
-  {
-    id: 4,
-    sender: 'me',
-    text: 'That sounds perfect. Do you have any openings this week?',
-    time: '10:08 AM',
-  },
-  {
-    id: 5,
-    sender: 'them',
-    text: 'Yes! I have Thursday at 2 PM or Friday at 11 AM available. Which works for you?',
-    time: '10:10 AM',
-  },
-];
+
 
 export default function ChatScreen() {
   const params = useLocalSearchParams();
 
-  const designerId = Number(params.id ?? 1);
+// Mostra a profissional do agendamento enviado pela tela My Appointments.
+const designer = {
+  name:
+    typeof params.designerName === 'string'
+      ? params.designerName
+      : 'Nail artist',
+  avatar:
+    typeof params.avatarUrl === 'string'
+      ? params.avatarUrl
+      : undefined,
+};
 
-  const designer =
-    DESIGNERS.find((item) => item.id === designerId) ?? DESIGNERS[0];
+const [messages, setMessages] = useState<Message[]>([]);  const [input, setInput] = useState('');
+// Carrega somente as mensagens deste agendamento.
+useEffect(() => {
+  const appointmentId = params.appointmentId;
 
-  const [messages, setMessages] = useState<Message[]>(INITIAL_MESSAGES);
-  const [input, setInput] = useState('');
+  if (typeof appointmentId !== 'string') {
+    return;
+  }
 
-  function send() {
-    if (!input.trim()) {
+  async function loadMessages() {
+    const {
+      data: { user },
+      error: userError,
+    } = await supabase.auth.getUser();
+
+    if (userError || !user) {
+      console.log('Chat user error:', userError?.message);
       return;
     }
 
-    const myMessage: Message = {
+    const { data, error } = await supabase
+      .from('chat_messages')
+      .select('id, sender_id, body, created_at')
+      .eq('appointment_id', appointmentId)
+      .order('created_at', { ascending: true });
+
+    if (error) {
+      console.log('Load messages error:', error.message);
+      return;
+    }
+
+    setMessages(
+      (data ?? []).map((item) => ({
+        id: item.id,
+        sender: item.sender_id === user.id ? 'me' : 'them',
+        text: item.body,
+        time: new Date(item.created_at).toLocaleTimeString([], {
+          hour: '2-digit',
+          minute: '2-digit',
+        }),
+      }))
+    );
+  }
+
+  loadMessages();
+}, [params.appointmentId]);
+async function send() {
+  const text = input.trim();
+  const appointmentId = params.appointmentId;
+
+  // Uma mensagem precisa estar ligada a um agendamento real.
+  if (!text || typeof appointmentId !== 'string') {
+    return;
+  }
+
+  const {
+    data: { user },
+    error: userError,
+  } = await supabase.auth.getUser();
+
+  if (userError || !user) {
+    console.log('Chat user error:', userError?.message);
+    return;
+  }
+
+  // Salva a mensagem com o ID de quem está conectado.
+  const { data, error } = await supabase
+    .from('chat_messages')
+    .insert({
+      appointment_id: appointmentId,
+      sender_id: user.id,
+      body: text,
+    })
+    .select('body, created_at')
+    .single();
+
+  if (error) {
+    console.log('Send message error:', error.message);
+    return;
+  }
+
+  setMessages((current) => [
+    ...current,
+    {
       id: Date.now(),
       sender: 'me',
-      text: input.trim(),
-      time: 'Now',
-    };
+      text: data.body,
+      time: new Date(data.created_at).toLocaleTimeString([], {
+        hour: '2-digit',
+        minute: '2-digit',
+      }),
+    },
+  ]);
 
-    setMessages((current) => [...current, myMessage]);
-
-    setInput('');
-
-    setTimeout(() => {
-      const reply: Message = {
-        id: Date.now() + 1,
-        sender: 'them',
-        text: "Thanks! I'll get back to you shortly. 🌸",
-        time: 'Now',
-      };
-
-      setMessages((current) => [...current, reply]);
-    }, 1200);
-  }
+  setInput('');
+}
 
   return (
     <KeyboardAvoidingView
@@ -171,9 +214,9 @@ export default function ChatScreen() {
             {designer.name}
           </Text>
 
-          <Text style={styles.online}>
-            ● Online
-          </Text>
+         <Text style={styles.online}>
+  Appointment chat
+</Text>
         </View>
       </View>
 
@@ -196,13 +239,19 @@ export default function ChatScreen() {
                   : styles.messageRowThem,
               ]}
             >
-              {!mine && (
-                <Image
-                  source={designer.avatar}
-                  style={styles.smallAvatar}
-                  contentFit="cover"
-                />
-              )}
+{!mine && (
+  designer.avatar ? (
+    <Image
+      source={{ uri: designer.avatar }}
+      style={styles.smallAvatar}
+      contentFit="cover"
+    />
+  ) : (
+    <View
+      style={[styles.smallAvatar, { backgroundColor: COLORS.muted }]}
+    />
+  )
+)}
 
               <View style={styles.messageWrapper}>
                 <View

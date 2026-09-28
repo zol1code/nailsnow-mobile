@@ -65,6 +65,8 @@ type RequestStatus = 'pending' | 'confirmed';
 type BookingRequest = {
   // Unique ID used to track this request safely
   id: string;
+  // ID real do agendamento no Supabase; os cartões de exemplo não têm esse ID.
+  appointmentId?: string;
   client: string;
   service: string;
   date: string;
@@ -558,6 +560,142 @@ const tabs = [
     status: 'confirmed',
   },
 ]);
+// Agendamentos reais recebidos pelo perfil da profissional no Supabase.
+const [realRequests, setRealRequests] = useState<BookingRequest[]>([]);
+
+// Confirma um agendamento real no Supabase.
+async function acceptRealRequest(appointmentId: string) {
+  const {
+    data: { user },
+    error: userError,
+  } = await supabase.auth.getUser();
+
+  if (userError || !user) {
+    Alert.alert('Error', 'Please log in again.');
+    return;
+  }
+
+  const { data, error } = await supabase
+    .from('appointments')
+    .update({ status: 'confirmed' })
+    .eq('id', appointmentId)
+    .eq('designer_id', user.id)
+    .eq('status', 'pending')
+    .select('id')
+    .maybeSingle();
+
+  if (error || !data) {
+    console.log('Accept appointment error:', error?.message);
+    Alert.alert('Error', 'Could not accept this appointment.');
+    return;
+  }
+
+  // Atualiza o cartão na tela após o Supabase confirmar a alteração.
+  setRealRequests((current) =>
+    current.map((request) =>
+      request.id === appointmentId
+        ? { ...request, status: 'confirmed' }
+        : request
+    )
+  );
+}
+
+// Recusa um agendamento pendente da profissional no Supabase.
+async function declineRealRequest(appointmentId: string) {
+  const {
+    data: { user },
+    error: userError,
+  } = await supabase.auth.getUser();
+
+  if (userError || !user) {
+    Alert.alert('Error', 'Please log in again.');
+    return;
+  }
+
+  const { data, error } = await supabase
+    .from('appointments')
+    .update({ status: 'declined' })
+    .eq('id', appointmentId)
+    .eq('designer_id', user.id)
+    .eq('status', 'pending')
+    .select('id')
+    .maybeSingle();
+
+  if (error || !data) {
+    console.log('Decline appointment error:', error?.message);
+    Alert.alert('Error', 'Could not decline this appointment.');
+    return;
+  }
+
+  // Pedidos recusados saem da lista de pedidos pendentes.
+  setRealRequests((current) =>
+    current.filter((request) => request.id !== appointmentId)
+  );
+}
+// Atualiza os agendamentos da profissional sempre que ela abre o painel.
+useFocusEffect(
+  useCallback(() => {
+    let active = true;
+
+    async function loadRealRequests() {
+      const {
+        data: { user },
+        error: userError,
+      } = await supabase.auth.getUser();
+
+      if (userError || !user) {
+        console.log('Designer user error:', userError?.message);
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from('appointments')
+        .select(
+          'id, customer_id, service_name, appointment_date, appointment_time, status'
+        )
+        .eq('designer_id', user.id)
+        .in('status', ['pending', 'confirmed'])
+        .order('appointment_date', { ascending: true });
+
+      if (error) {
+        console.log('Designer appointments error:', error.message);
+        return;
+      }
+    // Busca nome e foto somente dos clientes com agendamento desta profissional.
+const { data: bookingCustomers, error: customersError } =
+  await supabase.rpc('get_booking_customers');
+
+if (customersError) {
+  console.log('Booking customers error:', customersError.message);
+}
+      if (active) {
+        setRealRequests(
+          (data ?? []).map((item) => ({
+            id: item.id,
+            appointmentId: item.id,
+            client:
+  bookingCustomers?.find(
+(customer: { customer_id: string }) =>
+  customer.customer_id === item.customer_id  )?.customer_name || 'Customer',
+            service: item.service_name,
+            date: `${item.appointment_date} · ${item.appointment_time}`,
+            avatar:
+  bookingCustomers?.find(
+    (customer: { customer_id: string }) =>
+      customer.customer_id === item.customer_id
+  )?.customer_avatar_url || '',
+            status: item.status === 'confirmed' ? 'confirmed' : 'pending',
+          }))
+        );
+      }
+    }
+
+    loadRealRequests();
+    return () => {
+      active = false;
+    };
+  }, [])
+);
   // Loads the customer's saved appointment and turns it into a designer request.
 // This connects the customer booking flow with the designer dashboard locally.
 useFocusEffect(
@@ -1351,17 +1489,26 @@ onPress={() =>
 )}  
         {tab === 'Requests' && (
           <View style={styles.requestsList}>
-            {requests.map((request, index) => (
+            {realRequests.map((request, index) => (
               <View
                 key={`${request.client}-${index}`}
                 style={styles.requestCard}
               >
                 <View style={styles.requestCardTop}>
-                  <Image
-                    source={request.avatar}
-                    style={styles.requestCardAvatar}
-                    contentFit="cover"
-                  />
+                 {request.avatar ? (
+  <Image
+    source={request.avatar}
+    style={styles.requestCardAvatar}
+    contentFit="cover"
+  />
+) : (
+  <View
+    style={[
+      styles.requestCardAvatar,
+      { backgroundColor: COLORS.muted },
+    ]}
+  />
+)}
 
                   <View style={styles.requestInfo}>
                     <Text style={styles.requestClient}>
@@ -1427,7 +1574,8 @@ onPress={() =>
                   </Text>
                 </View>
 
-                {request.status === 'pending' && (
+               {/* Os botões antigos só funcionam para cartões locais de demonstração. */}
+{request.status === 'pending' && !request.appointmentId && (
                   <View style={styles.requestButtons}>
                     <Pressable
   style={styles.acceptButton}
@@ -1554,9 +1702,48 @@ setAcceptedRequests((prev) => {
 </Pressable>
                   </View>
                 )}
-              </View>
-            ))}
-          </View>
+
+
+{/* A profissional confirma o agendamento real no Supabase. */}
+{request.appointmentId && request.status === 'pending' && (
+  <View style={styles.requestButtons}>
+    <Pressable
+      style={styles.acceptButton}
+      onPress={() => acceptRealRequest(request.appointmentId!)}
+    >
+      <Text style={styles.acceptButtonText}>Accept</Text>
+    </Pressable>
+    <Pressable
+  style={styles.declineButton}
+  onPress={() => declineRealRequest(request.appointmentId!)}
+>
+  <Text style={styles.declineButtonText}>Decline</Text>
+</Pressable>
+  </View>
+)}
+
+{request.appointmentId && (
+  <Pressable
+    style={styles.acceptButton}
+    onPress={() =>
+      router.push({
+        pathname: '/chat',
+        params: {
+          appointmentId: request.appointmentId,
+          designerName: request.client,
+          avatarUrl: request.avatar,
+        },
+      })
+    }
+  >
+    <Text style={styles.acceptButtonText}>
+      Chat with Customer
+    </Text>
+  </Pressable>
+)}
+</View>
+))}
+   </View>
         )}
       </ScrollView>
     </View>

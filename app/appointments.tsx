@@ -1,5 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
+import { Image } from 'expo-image';
 import { supabase } from '../lib/supabase';
+
 // Stores appointments locally so they remain available after closing the app
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -92,6 +94,7 @@ type RealAppointment = {
   status:
     | 'pending'
     | 'confirmed'
+    | 'declined'
     | 'in_progress'
     | 'completed'
     | 'cancelled'
@@ -103,6 +106,11 @@ export default function AppointmentsScreen() {
     // Appointments loaded from the real Supabase database.
   const [realAppointments, setRealAppointments] =
     useState<RealAppointment[]>([]);
+
+    // Guarda os perfis das profissionais pelo ID usado nos agendamentos.
+const [designerProfiles, setDesignerProfiles] = useState<
+  Record<string, { name: string | null; avatar_url: string | null }>
+>({});
 
   // Controls the loading state while Supabase is being queried.
   const [loadingAppointments, setLoadingAppointments] =
@@ -145,6 +153,31 @@ async function loadRealAppointments() {
     console.log('REAL APPOINTMENTS FROM SUPABASE:', data);
 
     setRealAppointments((data ?? []) as RealAppointment[]);
+    // Busca somente as profissionais presentes nos agendamentos carregados.
+const designerIds = [
+  ...new Set((data ?? []).map((item) => item.designer_id)),
+];
+
+if (designerIds.length > 0) {
+  const { data: profiles, error: profilesError } = await supabase
+    .from('profiles')
+    .select('id, name, avatar_url')
+    .eq('user_type', 'designer')
+    .in('id', designerIds);
+
+  if (profilesError) {
+    console.log('Designer profiles error:', profilesError.message);
+  } else {
+    // Permite localizar cada perfil pelo designer_id do agendamento.
+    const profilesById = Object.fromEntries(
+      (profiles ?? []).map((profile) => [
+        profile.id,
+        { name: profile.name, avatar_url: profile.avatar_url },
+      ])
+    );
+    setDesignerProfiles(profilesById);
+  }
+}
   } catch (error) {
     console.log('Unexpected appointments error:', error);
   } finally {
@@ -458,16 +491,38 @@ const getDesignerForAppointment = (
         style={styles.card}
       >
         <View style={styles.statusRow}>
-          <View style={styles.confirmedBadge}>
-            <View style={styles.statusDot} />
-
-           <Text style={styles.confirmedText}>
+          <View
+  style={[
+    styles.confirmedBadge,
+    appointment.status === 'declined' && {
+      backgroundColor: '#FEE2E2',
+    },
+  ]}
+>
+            <View
+  style={[
+    styles.statusDot,
+    appointment.status === 'declined' && {
+      backgroundColor: '#DC2626',
+    },
+  ]}
+/>
+<Text
+  style={[
+    styles.confirmedText,
+    appointment.status === 'declined' && {
+      color: '#991B1B',
+    },
+  ]}
+>
   {appointment.status === 'confirmed'
     ? 'Confirmed'
     : appointment.status === 'in_progress'
     ? 'In Progress'
     : appointment.status === 'completed'
     ? 'Completed'
+    : appointment.status === 'declined'
+    ? 'Declined'
     : appointment.status === 'cancelled'
     ? 'Cancelled'
     : appointment.status === 'disputed'
@@ -475,18 +530,31 @@ const getDesignerForAppointment = (
     : 'Pending'}
 </Text>
           </View>
-
-          <Text style={styles.upcoming}>
-            Upcoming
-          </Text>
+<Text style={styles.upcoming}>
+  {appointment.status === 'declined'
+    ? 'Declined'
+    : appointment.status === 'cancelled'
+    ? 'Cancelled'
+    : appointment.status === 'completed'
+    ? 'Completed'
+    : 'Upcoming'}
+</Text>
         </View>
 
         <View style={styles.designerRow}>
-      <View style={styles.avatar} />
+      {designerProfiles[appointment.designer_id]?.avatar_url ? (
+  <Image
+    source={{ uri: designerProfiles[appointment.designer_id].avatar_url! }}
+    style={styles.avatar}
+    contentFit="cover"
+  />
+) : (
+  <View style={styles.avatar} />
+)}
 
 <View>
   <Text style={styles.designerName}>
-    Nail artist
+    {designerProfiles[appointment.designer_id]?.name ?? 'Nail artist'}
   </Text>
             <Text style={styles.serviceName}>
               {appointment.service_name}
@@ -517,9 +585,23 @@ const getDesignerForAppointment = (
         </View>
 
         <View style={styles.actions}>
-          <Pressable style={styles.chatButton} disabled>
+         <Pressable
+  style={styles.chatButton}
+  onPress={() =>
+    router.push({
+      pathname: '/chat',
+      params: {
+        appointmentId: appointment.id,
+        designerName:
+          designerProfiles[appointment.designer_id]?.name ?? 'Nail artist',
+        avatarUrl:
+          designerProfiles[appointment.designer_id]?.avatar_url ?? '',
+      },
+    })
+  }
+>
   <Text style={styles.chatButtonText}>
-    Chat coming soon
+    Chat with Artist
   </Text>
 </Pressable>
 
