@@ -1,8 +1,9 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
+  Alert,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -162,64 +163,105 @@ const duration = Number(params.duration ?? 0);
     return numbers;
   }
 
-  async function confirmBooking() {
-  // Gets the customer currently logged into the app.
-  const {
-    data: { user },
-    error: userError,
-  } = await supabase.auth.getUser();
+  // Updates the button while a booking is being submitted.
+const [isBooking, setIsBooking] = useState(false);
 
-  if (userError || !user) {
-    console.log(
-      'Create appointment error: customer not logged in'
-    );
+// Immediately blocks repeated taps, before React updates the screen.
+const bookingInProgress = useRef(false);
+
+async function confirmBooking() {
+  if (bookingInProgress.current) {
     return;
   }
 
-  // Creates the real appointment in Supabase.
-  const { data: createdAppointment, error } = await supabase
-    .from('appointments')
-    .insert({
-      customer_id: user.id,
-      designer_id: designerId,
-      service_id: serviceId,
-      service_name: service,
-      price,
-      duration_minutes: duration,
-      appointment_date: date,
-      appointment_time: time,
-      status: 'pending',
-    })
-    .select('id')
-    .single();
+  bookingInProgress.current = true;
+  setIsBooking(true);
 
-  if (error) {
-    console.log(
-      'Create appointment error:',
-      error.message
+  let bookingCreated = false;
+
+  try {
+    // Gets the customer currently logged into the app.
+    const {
+      data: { user },
+      error: userError,
+    } = await supabase.auth.getUser();
+
+    if (userError || !user) {
+      Alert.alert(
+        'Sign in required',
+        'Please sign in again before booking.'
+      );
+      return;
+    }
+
+    // Creates the real appointment in Supabase.
+    const { data: createdAppointment, error } = await supabase
+      .from('appointments')
+      .insert({
+        customer_id: user.id,
+        designer_id: designerId,
+        service_id: serviceId,
+        service_name: service,
+        price,
+        duration_minutes: duration,
+        appointment_date: date,
+        appointment_time: time,
+        status: 'pending',
+      })
+      .select('id')
+      .single();
+
+    if (error) {
+      console.log('Create appointment error:', error.message);
+
+      if (error.code === '23P01') {
+        Alert.alert(
+          'Time unavailable',
+          'This time overlaps another booking. Please go back and choose another time.'
+        );
+      } else {
+        Alert.alert(
+          'Booking failed',
+          'We could not create your appointment. Please try again.'
+        );
+      }
+
+      return;
+    }
+
+    // Keeps submission locked after the appointment is created.
+    bookingCreated = true;
+
+    // Replaces checkout so Back does not reopen this submitted booking.
+    router.replace({
+      pathname: '/confirmed',
+      params: {
+        id: designerId,
+        appointmentId: createdAppointment.id,
+        service,
+        price: price.toString(),
+        duration: duration.toString(),
+        date,
+        time,
+      },
+    });
+  } catch (error) {
+    console.log('Unexpected booking error:', error);
+
+    Alert.alert(
+      'Something went wrong',
+      bookingCreated
+        ? 'Your booking was created. Please check My Appointments.'
+        : 'We could not confirm the result. Please check My Appointments before trying again.'
     );
-    return;
+  } finally {
+    // Allows another attempt when no booking was confirmed.
+    if (!bookingCreated) {
+      bookingInProgress.current = false;
+      setIsBooking(false);
+    }
   }
-
-  // Opens the confirmation screen only after
-  // Supabase successfully creates the appointment.
-  router.push({
-    pathname: '/confirmed',
-    params: {
-      id: designerId,
-
-      // Real appointment ID created by Supabase.
-      appointmentId: createdAppointment.id,
-
-      service,
-      price: price.toString(),
-      duration: duration.toString(),
-      date,
-      time,
-    },
-  });
 }
-
   return (
     <View style={styles.container}>
       <View style={styles.header}>
@@ -396,16 +438,22 @@ const duration = Number(params.duration ?? 0);
         </View>
       </ScrollView>
 
-      <View style={styles.bottomBar}>
-        <Pressable
-          style={styles.payButton}
-          onPress={confirmBooking}
-        >
-          <Text style={styles.payText}>
-            Pay ${total.toFixed(2)} · Confirm Booking
-          </Text>
-        </Pressable>
-      </View>
+     <View style={styles.bottomBar}>
+  <Pressable
+    style={[
+      styles.payButton,
+      isBooking && { opacity: 0.6 },
+    ]}
+    onPress={confirmBooking}
+    disabled={isBooking}
+  >
+    <Text style={styles.payText}>
+      {isBooking
+        ? 'Creating booking…'
+        : `Pay $${total.toFixed(2)} · Confirm Booking`}
+    </Text>
+  </Pressable>
+</View>
     </View>
   );
 }
