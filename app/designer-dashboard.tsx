@@ -767,23 +767,85 @@ const pendingRequests = requests.filter(
     !declinedRequests.includes(request.id)
 );
 
-const [portfolio, setPortfolio] = useState(
-  Object.values(N).map((id) => img(id, 200, 200))
-);
+// Starts empty until the designer's real photos are loaded.
+const [portfolio, setPortfolio] = useState<string[]>([]);
 // Runs when the Designer Dashboard screen opens
 // Loads the portfolio photos previously saved on the device
-useEffect(() => {
-  const loadPortfolio = async () => {
-    const savedPortfolio = await AsyncStorage.getItem('designerPortfolio');
- // If saved photos exist, convert them back into an array
-    // and display them in the portfolio
-    if (savedPortfolio) {
-      setPortfolio(JSON.parse(savedPortfolio));
-    }
-  };
+// Loads the signed-in designer's photos directly from Storage.
+useFocusEffect(
+  useCallback(() => {
+    let active = true;
 
-  loadPortfolio();
-}, []);
+    // Clears photos from the previously displayed account.
+    setPortfolio([]);
+
+    async function loadPortfolio() {
+      try {
+        const {
+          data: { user },
+          error: userError,
+        } = await supabase.auth.getUser();
+
+        if (userError) throw userError;
+        if (!user || !active) return;
+
+        const bucket = supabase.storage.from('designer-portfolios');
+        const photoUrls: string[] = [];
+        let offset = 0;
+
+        // Loads all pages so larger portfolios are not cut off.
+        while (active) {
+          const { data, error } = await bucket.list(user.id, {
+            limit: 100,
+            offset,
+            sortBy: { column: 'name', order: 'asc' },
+          });
+
+          if (error) throw error;
+          if (!active) return;
+
+          const files = data ?? [];
+
+          for (const file of files) {
+            // Skips folders and Storage placeholder files.
+            if (!file.id || file.name === '.emptyFolderPlaceholder') {
+              continue;
+            }
+
+            const { data: urlData } = bucket.getPublicUrl(
+              `${user.id}/${file.name}`
+            );
+
+            photoUrls.push(urlData.publicUrl);
+          }
+
+          if (files.length < 100) break;
+          offset += files.length;
+        }
+
+        if (active) {
+          setPortfolio(photoUrls);
+        }
+      } catch (error) {
+        console.log('Portfolio load error:', error);
+
+        if (active) {
+          Alert.alert(
+            'Could not load photos',
+            'Please reopen this screen to try again.'
+          );
+        }
+      }
+    }
+
+    loadPortfolio();
+
+    // Prevents an old request from updating the screen after leaving.
+    return () => {
+      active = false;
+    };
+  }, [])
+);
   const days = [
     'Monday',
     'Tuesday',
@@ -1319,29 +1381,42 @@ onPress={() =>
               </Pressable>
             </View>
 
-            <View style={styles.portfolioGrid}>
-              {portfolio.map((source, index) => (
-                <Image
-                  key={index}
-                  source={source}
-                  style={styles.portfolioImage}
-                  contentFit="cover"
-                />
-              ))}
+           <View style={styles.portfolioGrid}>
+  {portfolio.map((source, index) => (
+    <View
+      key={`${source}-${index}`}
+      style={[
+        styles.portfolioImage,
+        { backgroundColor: COLORS.muted, overflow: 'hidden' },
+      ]}
+    >
+      <Image
+        source={{ uri: source }}
+        style={{ width: '100%', height: '100%' }}
+        contentFit="cover"
+        onError={(event) =>
+          console.log('Portfolio display error:', source, event.error)
+        }
+      />
 
-              <Pressable
-  style={styles.addPhotoTile}
-  onPress={pickImage}
->
-                <Ionicons
-                  name="add"
-                  size={26}
-                  color={COLORS.mutedForeground}
-                />
-              </Pressable>
-            </View>
-          </>
-        )}
+      {/* Temporarily identifies every photo slot. */}
+      
+    </View>
+  ))}
+
+  <Pressable
+    style={styles.addPhotoTile}
+    onPress={pickImage}
+  >
+    <Ionicons
+      name="add"
+      size={26}
+      color={COLORS.mutedForeground}
+    />
+  </Pressable>
+</View>
+</>
+)}
 
         {tab === 'Schedule' && (
           <View>

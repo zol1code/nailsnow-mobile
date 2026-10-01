@@ -402,11 +402,11 @@ useEffect(() => {
     // Loads the services that belong to this designer.
 const { data: services, error: servicesError } = await supabase
   .from('designer_services')
-  .select(
-    'id, name, description, price, duration_minutes'
-  )
-  .eq('designer_id', profileId)
-  .order('created_at', { ascending: true });
+.select('id, name, description, price, duration_minutes')
+.eq('designer_id', profileId)
+// Shows only active services on the public profile.
+.eq('is_active', true)
+.order('created_at', { ascending: true });
 
 if (servicesError) {
   console.log(
@@ -422,6 +422,80 @@ setRealServices(services ?? []);
   loadRealProfile();
 }, [profileId]);
 
+// Stores this designer's real portfolio photos.
+const [realPortfolio, setRealPortfolio] = useState<string[]>([]);
+const [loadingPortfolio, setLoadingPortfolio] = useState(true);
+const [portfolioError, setPortfolioError] = useState(false);
+
+// Loads photos from the selected designer's Storage folder.
+useEffect(() => {
+  let active = true;
+
+  setRealPortfolio([]);
+  setLoadingPortfolio(true);
+  setPortfolioError(false);
+
+  async function loadPublicPortfolio() {
+    try {
+      if (!profileId) return;
+
+      const bucket = supabase.storage.from('designer-portfolios');
+      const photoUrls: string[] = [];
+      let offset = 0;
+
+      // Reads every page of files in this designer's folder.
+      while (active) {
+        const { data, error } = await bucket.list(profileId, {
+          limit: 100,
+          offset,
+          sortBy: { column: 'name', order: 'asc' },
+        });
+
+        if (error) throw error;
+        if (!active) return;
+
+        const files = data ?? [];
+
+        for (const file of files) {
+          if (!file.id || file.name === '.emptyFolderPlaceholder') {
+            continue;
+          }
+
+          const { data: urlData } = bucket.getPublicUrl(
+            `${profileId}/${file.name}`
+          );
+
+          photoUrls.push(urlData.publicUrl);
+        }
+
+        if (files.length < 100) break;
+        offset += files.length;
+      }
+
+      if (active) {
+        setRealPortfolio(photoUrls);
+      }
+    } catch (error) {
+      console.log('Public portfolio load error:', error);
+
+      if (active) {
+        setPortfolioError(true);
+      }
+    } finally {
+      if (active) {
+        setLoadingPortfolio(false);
+      }
+    }
+  }
+
+  loadPublicPortfolio();
+
+  // Ignores results after leaving or opening another profile.
+  return () => {
+    active = false;
+  };
+}, [profileId]);
+
   const tabs = ['Portfolio', 'Services', 'Reviews'];
   
 
@@ -433,11 +507,21 @@ setRealServices(services ?? []);
       >
         {/* Cover */}
         <View style={styles.coverContainer}>
-          <Image
-            source={designer.portfolio[0]}
-            style={styles.cover}
-            contentFit="cover"
-          />
+         {/* Uses a real portfolio photo as the cover. */}
+{realPortfolio.length > 0 ? (
+  <Image
+    source={{ uri: realPortfolio[0] }}
+    style={styles.cover}
+    contentFit="cover"
+  />
+) : (
+  <View
+    style={[
+      styles.cover,
+      { backgroundColor: COLORS.muted },
+    ]}
+  />
+)}
 
           <Pressable
             style={styles.backButton}
@@ -556,21 +640,50 @@ setRealServices(services ?? []);
             ))}
           </View>
 
-          {/* Portfolio */}
-          {tab === 'Portfolio' && (
-            <View style={styles.portfolio}>
-              {designer.portfolio.map((photo, index) => (
-                <Image
-                  key={index}
-                  source={photo}
-                  style={styles.portfolioImage}
-                  contentFit="cover"
-                />
-              ))}
-            </View>
-          )}
-
-          {/* Services */}
+          {/* Displays the designer's real portfolio. */}
+{tab === 'Portfolio' && (
+  <View style={styles.portfolio}>
+    {loadingPortfolio ? (
+      <Text style={styles.noServicesText}>
+        Loading photos…
+      </Text>
+    ) : portfolioError ? (
+      <Text style={styles.noServicesText}>
+        Could not load photos. Please reopen this profile.
+      </Text>
+    ) : realPortfolio.length === 0 ? (
+      <Text style={styles.noServicesText}>
+        No portfolio photos yet.
+      </Text>
+    ) : (
+      realPortfolio.map((photo) => (
+        <View
+          key={photo}
+          style={[
+            styles.portfolioImage,
+            {
+              backgroundColor: COLORS.muted,
+              overflow: 'hidden',
+            },
+          ]}
+        >
+          <Image
+            source={{ uri: photo }}
+            style={{ width: '100%', height: '100%' }}
+            contentFit="cover"
+            onError={(event) =>
+              console.log(
+                'Public portfolio display error:',
+                photo,
+                event.error
+              )
+            }
+          />
+        </View>
+      ))
+    )}
+  </View>
+)}
           {/* Services loaded from Supabase for the selected designer. */}
 {tab === 'Services' && (
   <View style={styles.services}>

@@ -214,18 +214,28 @@ async function confirmBooking() {
     if (error) {
       console.log('Create appointment error:', error.message);
 
-      if (error.code === '23P01') {
-        Alert.alert(
-          'Time unavailable',
-          'This time overlaps another booking. Please go back and choose another time.'
-        );
-      } else {
-        Alert.alert(
-          'Booking failed',
-          'We could not create your appointment. Please try again.'
-        );
-      }
-
+     // Explains why Supabase rejected the booking.
+if (error.code === '23P01') {
+  Alert.alert(
+    'Time unavailable',
+    'This time overlaps another booking. Please go back and choose another time.'
+  );
+} else if (error.code === 'P1001') {
+  Alert.alert(
+    'Service unavailable',
+    'This service is no longer available. Please go back and choose a service again.'
+  );
+} else if (error.code === 'P1002') {
+  Alert.alert(
+    'Service updated',
+    'The service details have changed. Please go back and select the service again to review the current price and duration.'
+  );
+} else {
+  Alert.alert(
+    'Booking failed',
+    'We could not create your appointment. Please try again.'
+  );
+}
       return;
     }
 

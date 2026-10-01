@@ -153,13 +153,15 @@ useEffect(() => {
       return;
     }
 
-    const { data, error } = await supabase
-      .from('designer_services')
-      .select(
-        'id, name, description, price, duration_minutes'
-      )
-      .eq('designer_id', designerId)
-      .order('created_at', { ascending: true });
+    // Shows only active services offered by this designer.
+const { data, error } = await supabase
+  .from('designer_services')
+  .select(
+    'id, name, description, price, duration_minutes'
+  )
+  .eq('designer_id', designerId)
+  .eq('is_active', true)
+  .order('created_at', { ascending: true });
 
     if (error) {
       console.log(
@@ -174,8 +176,14 @@ useEffect(() => {
 
   loadDesignerServices();
 }, [designerId]);
-  const ready = Boolean(service && date && time);
-
+// Allows continuation only when the selected service
+// is still present in the loaded active services.
+const ready = Boolean(
+  service &&
+  realServices.some((item) => item.id === service.id) &&
+  date &&
+  time
+);
   function continueToPayment() {
     if (!service || !date || !time) {
       return;
@@ -231,55 +239,62 @@ useEffect(() => {
         contentContainerStyle={styles.content}
       >
         <View>
-          <Text style={styles.sectionTitle}>
-            Select Service
-          </Text>
+         <Text style={styles.sectionTitle}>
+  Select Service
+</Text>
 
-          <View style={styles.serviceList}>
-           {realServices.map((item) => {
-  const selected = service?.name === item.name;
+<View style={styles.serviceList}>
+  {realServices.length === 0 ? (
+    <Text style={styles.durationText}>
+      No services available to book at the moment.
+    </Text>
+  ) : (
+    realServices.map((item) => {
+      // Identifies each selected service by its unique ID.
+      const selected = service?.id === item.id;
 
-  return (
-    <Pressable
-      key={item.id}
-      style={[
-        styles.serviceCard,
-        selected && styles.serviceCardSelected,
-      ]}
-    onPress={() =>
-  setService({
-    id: item.id,
-    name: item.name,
-    price: Number(item.price),
-    duration: item.duration_minutes,
-  })
-}
-    >
-      <View>
-        <Text style={styles.serviceName}>
-          {item.name}
-        </Text>
+      return (
+        <Pressable
+          key={item.id}
+          style={[
+            styles.serviceCard,
+            selected && styles.serviceCardSelected,
+          ]}
+          onPress={() =>
+            setService({
+              id: item.id,
+              name: item.name,
+              price: Number(item.price),
+              duration: item.duration_minutes,
+            })
+          }
+        >
+          <View>
+            <Text style={styles.serviceName}>
+              {item.name}
+            </Text>
 
-        <View style={styles.durationRow}>
-          <Ionicons
-            name="time-outline"
-            size={13}
-            color={COLORS.mutedForeground}
-          />
+            <View style={styles.durationRow}>
+              <Ionicons
+                name="time-outline"
+                size={13}
+                color={COLORS.mutedForeground}
+              />
 
-          <Text style={styles.durationText}>
-            {item.duration_minutes} min
-          </Text>
-        </View>
-      </View>
-
-      <Text style={styles.price}>
-        €{Number(item.price).toFixed(2)}
-      </Text>
-    </Pressable>
-  );
-})}
+              <Text style={styles.durationText}>
+                {item.duration_minutes} min
+              </Text>
+            </View>
           </View>
+
+          <Text style={styles.price}>
+            €{Number(item.price).toFixed(2)}
+          </Text>
+        </Pressable>
+      );
+    })
+  )}
+</View>
         </View>
 
         <View>

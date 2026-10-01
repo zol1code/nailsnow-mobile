@@ -1,13 +1,14 @@
 import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import {
-    Pressable,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    View,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
 } from 'react-native';
+import DesignerServicesEditor from '../components/DesignerServicesEditor';
 // Provides access to the phone's photo library.
 import * as ImagePicker from 'expo-image-picker';
 // Displays the designer's profile photo.
@@ -277,6 +278,7 @@ starting_price:
 >
   <Text style={styles.saveButtonText}>Save Changes</Text>
 </Pressable>
+<DesignerServicesEditor />
       </View>
     </ScrollView>
   );
