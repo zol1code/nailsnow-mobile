@@ -230,15 +230,21 @@ if (error.code === '23P01') {
     'Service updated',
     'The service details have changed. Please go back and select the service again to review the current price and duration.'
   );
+} else if (error.code === 'P1003') {
+  Alert.alert(
+    'Outside working hours',
+    'The artist is unavailable for this appointment. Please go back and choose an available date and time.'
+  );
 } else {
   Alert.alert(
     'Booking failed',
     'We could not create your appointment. Please try again.'
   );
-}
+
+      }
+
       return;
     }
-
     // Keeps submission locked after the appointment is created.
     bookingCreated = true;
 

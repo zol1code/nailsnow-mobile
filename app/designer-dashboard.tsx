@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 // Runs synchronization logic whenever the dashboard becomes active
 import { useFocusEffect, useRouter } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Alert,
   Pressable,
@@ -335,89 +335,93 @@ useFocusEffect(
     loadRequestActions();
   }, [])
 );
+// Locks photo operations immediately, before the screen updates.
+const portfolioUploadLock = useRef(false);
+const [uploadingPhotos, setUploadingPhotos] = useState(false);
+
 const pickImage = async () => {
-  // Opens the phone gallery and allows the designer to select multiple photos.
-  const result = await ImagePicker.launchImageLibraryAsync({
-    mediaTypes: ['images'],
-    allowsMultipleSelection: true,
-    quality: 1,
-  });
-
-  if (result.canceled) {
+  if (portfolioUploadLock.current || deletingPhoto !== null) {
     return;
   }
 
-  // Gets the currently logged-in designer.
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  portfolioUploadLock.current = true;
+  setUploadingPhotos(true);
 
-  if (!user) {
-    console.log('Portfolio upload error: user not logged in');
-    return;
-  }
+  try {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsMultipleSelection: true,
+      quality: 1,
+    });
 
-  const uploadedPhotos: string[] = [];
+    if (result.canceled) return;
 
-  // Uploads every selected image separately.
-  for (const asset of result.assets) {
-    try {
-      // Reads the local Expo image URI.
-      const response = await fetch(asset.uri);
-      const arrayBuffer = await response.arrayBuffer();
+    const {
+      data: { user },
+      error: userError,
+    } = await supabase.auth.getUser();
 
-      // Creates a unique filename inside the designer's own folder.
-      const extension =
-        asset.fileName?.split('.').pop()?.toLowerCase() ?? 'jpg';
+    if (userError) throw userError;
 
-      const filePath =
-        `${user.id}/${Date.now()}-${Math.random()
-          .toString(36)
-          .slice(2)}.${extension}`;
+    if (!user) {
+      Alert.alert('Sign in required', 'Please sign in again.');
+      return;
+    }
 
-      // Uploads the image to Supabase Storage.
-      const { error: uploadError } = await supabase.storage
-        .from('designer-portfolios')
-        .upload(filePath, arrayBuffer, {
+    const bucket = supabase.storage.from('designer-portfolios');
+    let failedPhotos = 0;
+
+    for (const asset of result.assets) {
+      try {
+        const response = await fetch(asset.uri);
+        const imageData = await response.arrayBuffer();
+
+        const extension =
+          asset.fileName?.split('.').pop()?.toLowerCase() || 'jpg';
+
+        const filePath =
+          `${user.id}/${Date.now()}-${Math.random()
+            .toString(36)
+            .slice(2)}.${extension}`;
+
+        const { error } = await bucket.upload(filePath, imageData, {
           contentType: asset.mimeType ?? 'image/jpeg',
           upsert: false,
         });
 
-      if (uploadError) {
-        console.log(
-          'Portfolio upload error:',
-          uploadError.message
-        );
-        continue;
+        if (error) throw error;
+
+        const { data } = bucket.getPublicUrl(filePath);
+
+        // Displays each photo as soon as its upload succeeds.
+        // Storage is the source of truth; no local copy is needed.
+        setPortfolio((current) => [
+          ...current,
+          data.publicUrl,
+        ]);
+      } catch (error) {
+        failedPhotos += 1;
+        console.log('Portfolio upload error:', error);
       }
-
-      // Gets the permanent public URL for the uploaded image.
-      const { data: publicUrlData } = supabase.storage
-        .from('designer-portfolios')
-        .getPublicUrl(filePath);
-
-      uploadedPhotos.push(publicUrlData.publicUrl);
-    } catch (error) {
-      console.log('Portfolio image error:', error);
     }
-  }
 
-  // Adds successfully uploaded photos to the existing portfolio.
-  if (uploadedPhotos.length > 0) {
-    setPortfolio((prev) => {
-      const updatedPortfolio = [
-        ...prev,
-        ...uploadedPhotos,
-      ];
-
-      // Keeps the local copy for the current dashboard implementation.
-      AsyncStorage.setItem(
-        'designerPortfolio',
-        JSON.stringify(updatedPortfolio)
+    if (failedPhotos > 0) {
+      Alert.alert(
+        'Some photos were not uploaded',
+        `${failedPhotos} of ${result.assets.length} photos could not be uploaded. Please select those photos again and retry.`
       );
+    }
+  } catch (error) {
+    console.log('Portfolio picker error:', error);
 
-      return updatedPortfolio;
-    });
+    Alert.alert(
+      'Could not add photos',
+      'Please try again.'
+    );
+  } finally {
+    // Unlocks even when the gallery is cancelled or an error occurs.
+    portfolioUploadLock.current = false;
+    setUploadingPhotos(false);
   }
 };
   const [availableDays, setAvailableDays] = useState([
@@ -439,31 +443,223 @@ const [scheduleTimes, setScheduleTimes] = useState({
   Sunday: { start: '9:00 AM', end: '6:00 PM' },
 });
 
-// Loads the saved designer schedule when the dashboard opens.
-// This keeps availability and custom times after the app is closed.
+// Tracks whether the schedule is ready to be edited.
+const [loadingSchedule, setLoadingSchedule] = useState(true);
+const [scheduleLoadFailed, setScheduleLoadFailed] = useState(false);
+
+// Loads the signed-in designer's weekly schedule.
 useEffect(() => {
-  const loadSchedule = async () => {
-    const savedAvailableDays = await AsyncStorage.getItem(
-      'designerAvailableDays'
-    );
+  let active = true;
 
-    const savedScheduleTimes = await AsyncStorage.getItem(
-      'designerScheduleTimes'
-    );
+  async function loadSchedule() {
+    try {
+      setLoadingSchedule(true);
+      setScheduleLoadFailed(false);
 
-    // Restores the days the designer marked as available
-    if (savedAvailableDays) {
-      setAvailableDays(JSON.parse(savedAvailableDays));
+      const {
+        data: { user },
+        error: userError,
+      } = await supabase.auth.getUser();
+
+      if (userError) throw userError;
+      if (!user) throw new Error('Please sign in again.');
+
+      const { data, error } = await supabase
+        .from('designer_availability')
+        .select('day_of_week, is_available, start_time, end_time')
+        .eq('designer_id', user.id)
+        .order('day_of_week');
+
+      if (error) throw error;
+      if (!active) return;
+
+      if (data && data.length > 0) {
+        // Database weekday numbers start with Sunday.
+        const weekdayNames = [
+          'Sunday',
+          'Monday',
+          'Tuesday',
+          'Wednesday',
+          'Thursday',
+          'Friday',
+          'Saturday',
+        ] as const;
+
+        // Converts database times to the existing screen format.
+        function displayTime(value: string) {
+          const [hours, minutes] = value.split(':').map(Number);
+          const period = hours >= 12 ? 'PM' : 'AM';
+
+          return `${hours % 12 || 12}:${String(minutes).padStart(2, '0')} ${period}`;
+        }
+
+        const loadedTimes = {
+          Monday: { start: '9:00 AM', end: '6:00 PM' },
+          Tuesday: { start: '9:00 AM', end: '6:00 PM' },
+          Wednesday: { start: '9:00 AM', end: '6:00 PM' },
+          Thursday: { start: '9:00 AM', end: '6:00 PM' },
+          Friday: { start: '9:00 AM', end: '6:00 PM' },
+          Saturday: { start: '9:00 AM', end: '6:00 PM' },
+          Sunday: { start: '9:00 AM', end: '6:00 PM' },
+        };
+
+        const loadedDays: string[] = [];
+
+        for (const row of data) {
+          const day = weekdayNames[row.day_of_week];
+
+          if (!day) throw new Error('Invalid schedule weekday.');
+
+          loadedTimes[day] = {
+            start: displayTime(row.start_time),
+            end: displayTime(row.end_time),
+          };
+
+          if (row.is_available) loadedDays.push(day);
+        }
+
+        setAvailableDays(loadedDays);
+        setScheduleTimes(loadedTimes);
+      } else {
+        // Keeps the previous device settings as a migration preview.
+        // These settings are not automatically published to Supabase.
+        const [savedDays, savedTimes] = await Promise.all([
+          AsyncStorage.getItem('designerAvailableDays'),
+          AsyncStorage.getItem('designerScheduleTimes'),
+        ]);
+
+        if (!active) return;
+
+        if (savedDays) setAvailableDays(JSON.parse(savedDays));
+        if (savedTimes) setScheduleTimes(JSON.parse(savedTimes));
+      }
+    } catch (error) {
+      console.log('Schedule load error:', error);
+
+      if (active) {
+        setScheduleLoadFailed(true);
+        Alert.alert(
+          'Could not load schedule',
+          'Please reopen this screen before editing your availability.'
+        );
+      }
+    } finally {
+      if (active) setLoadingSchedule(false);
     }
-
-    // Restores the custom opening and closing times
-    if (savedScheduleTimes) {
-      setScheduleTimes(JSON.parse(savedScheduleTimes));
-    }
-  };
+  }
 
   loadSchedule();
+
+  return () => {
+    active = false;
+  };
 }, []);
+
+// Prevents repeated schedule submissions.
+const scheduleSaveLock = useRef(false);
+const [savingSchedule, setSavingSchedule] = useState(false);
+
+async function saveSchedule() {
+  if (
+    scheduleSaveLock.current ||
+    loadingSchedule ||
+    scheduleLoadFailed
+  ) {
+    return;
+  }
+
+  scheduleSaveLock.current = true;
+  setSavingSchedule(true);
+
+  try {
+    const weekdayNames = [
+      'Sunday',
+      'Monday',
+      'Tuesday',
+      'Wednesday',
+      'Thursday',
+      'Friday',
+      'Saturday',
+    ] as const;
+
+    // Converts the existing display format to database time.
+    function databaseTime(value: string) {
+      const match = value.match(/^(\d{1,2}):(\d{2}) (AM|PM)$/);
+
+      if (!match) throw new Error('Invalid time format.');
+
+      const hour = Number(match[1]);
+      const minute = Number(match[2]);
+
+      if (hour < 1 || hour > 12 || minute > 59) {
+        throw new Error('Invalid time.');
+      }
+
+      const hours =
+        (hour % 12) + (match[3] === 'PM' ? 12 : 0);
+
+      return `${String(hours).padStart(2, '0')}:${match[2]}:00`;
+    }
+
+    const {
+      data: { user },
+      error: userError,
+    } = await supabase.auth.getUser();
+
+    if (userError) throw userError;
+    if (!user) throw new Error('Please sign in again.');
+
+    const rows = weekdayNames.map((day, dayIndex) => {
+      const start = databaseTime(scheduleTimes[day].start);
+      const end = databaseTime(scheduleTimes[day].end);
+
+      if (start >= end) {
+        throw new Error(
+          `${day}: opening time must be earlier than closing time.`
+        );
+      }
+
+      return {
+        designer_id: user.id,
+        day_of_week: dayIndex,
+        is_available: availableDays.includes(day),
+        start_time: start,
+        end_time: end,
+      };
+    });
+
+    // Creates missing days and updates existing days in one request.
+    const { data, error } = await supabase
+      .from('designer_availability')
+      .upsert(rows, {
+        onConflict: 'designer_id,day_of_week',
+      })
+      .select('day_of_week');
+
+    if (error) throw error;
+
+    if (data?.length !== 7) {
+      throw new Error('The complete schedule could not be saved.');
+    }
+
+    Alert.alert(
+      'Schedule saved',
+      'Your weekly availability has been saved.'
+    );
+  } catch (error) {
+    console.log('Schedule save error:', error);
+
+    Alert.alert(
+      'Could not save schedule',
+      error instanceof Error
+        ? error.message
+        : 'Please try again.'
+    );
+  } finally {
+    scheduleSaveLock.current = false;
+    setSavingSchedule(false);
+  }
+}
 
 const timeOptions = [
   '7:00 AM',
@@ -769,6 +965,91 @@ const pendingRequests = requests.filter(
 
 // Starts empty until the designer's real photos are loaded.
 const [portfolio, setPortfolio] = useState<string[]>([]);
+
+// Identifies the photo currently being deleted.
+const [deletingPhoto, setDeletingPhoto] = useState<string | null>(null);
+
+// Asks for confirmation before permanently deleting a photo.
+function confirmDeletePortfolioPhoto(source: string) {
+  Alert.alert(
+    'Delete photo?',
+    'This photo will be removed from your public portfolio.',
+    [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: () => {
+          void deletePortfolioPhoto(source);
+        },
+      },
+    ]
+  );
+}
+
+// Deletes only a photo inside the signed-in designer's folder.
+async function deletePortfolioPhoto(source: string) {
+if (deletingPhoto !== null || portfolioUploadLock.current) return;
+  setDeletingPhoto(source);
+
+  try {
+    const {
+      data: { user },
+      error: userError,
+    } = await supabase.auth.getUser();
+
+    if (userError) throw userError;
+    if (!user) throw new Error('Please sign in again.');
+
+    const bucket = supabase.storage.from('designer-portfolios');
+
+    // Builds the expected URL prefix for this designer's folder.
+    const { data: folderUrl } = bucket.getPublicUrl(`${user.id}/`);
+
+    if (!source.startsWith(folderUrl.publicUrl)) {
+      throw new Error('This photo does not belong to your account.');
+    }
+
+    const fileName = decodeURIComponent(
+      source.slice(folderUrl.publicUrl.length)
+    );
+
+    // Rejects empty filenames and paths outside this folder.
+    if (
+      !fileName ||
+      fileName.includes('/') ||
+      fileName.includes('\\') ||
+      fileName === '.' ||
+      fileName === '..'
+    ) {
+      throw new Error('Invalid photo path.');
+    }
+
+    const { data, error } = await bucket.remove([
+      `${user.id}/${fileName}`,
+    ]);
+
+    if (error) throw error;
+
+    if (!data || data.length === 0) {
+      throw new Error('The photo could not be deleted.');
+    }
+
+    // Updates the screen only after Storage confirms deletion.
+    setPortfolio((current) =>
+      current.filter((photo) => photo !== source)
+    );
+  } catch (error) {
+    console.log('Portfolio delete error:', error);
+
+    Alert.alert(
+      'Could not delete photo',
+      'Please try again. If the problem continues, reopen this screen.'
+    );
+  } finally {
+    setDeletingPhoto(null);
+  }
+}
 // Runs when the Designer Dashboard screen opens
 // Loads the portfolio photos previously saved on the device
 // Loads the signed-in designer's photos directly from Storage.
@@ -1368,6 +1649,7 @@ onPress={() =>
               <Pressable
   style={styles.addPhotosButton}
   onPress={pickImage}
+  disabled={deletingPhoto !== null || uploadingPhotos}
 >
                 <Ionicons
                   name="add"
@@ -1376,8 +1658,8 @@ onPress={() =>
                 />
 
                 <Text style={styles.addPhotosText}>
-                  Add Photos
-                </Text>
+  {uploadingPhotos ? 'Uploading…' : 'Add Photos'}
+</Text>
               </Pressable>
             </View>
 
@@ -1387,7 +1669,11 @@ onPress={() =>
       key={`${source}-${index}`}
       style={[
         styles.portfolioImage,
-        { backgroundColor: COLORS.muted, overflow: 'hidden' },
+        {
+          backgroundColor: COLORS.muted,
+          overflow: 'hidden',
+          position: 'relative',
+        },
       ]}
     >
       <Image
@@ -1399,14 +1685,39 @@ onPress={() =>
         }
       />
 
-      {/* Temporarily identifies every photo slot. */}
-      
+      {/* Deletes this specific photo after confirmation. */}
+      <Pressable
+        onPress={() => confirmDeletePortfolioPhoto(source)}
+        disabled={deletingPhoto !== null || uploadingPhotos}
+        accessibilityRole="button"
+        accessibilityLabel="Delete portfolio photo"
+        hitSlop={6}
+        style={{
+          position: 'absolute',
+          top: 6,
+          right: 6,
+          width: 32,
+          height: 32,
+          borderRadius: 16,
+          backgroundColor: '#FFFFFF',
+          alignItems: 'center',
+          justifyContent: 'center',
+          opacity: deletingPhoto !== null ? 0.5 : 1,
+        }}
+      >
+        <Ionicons
+          name="trash-outline"
+          size={18}
+          color="#D4183D"
+        />
+      </Pressable>
     </View>
   ))}
 
   <Pressable
     style={styles.addPhotoTile}
     onPress={pickImage}
+    disabled={deletingPhoto !== null || uploadingPhotos}
   >
     <Ionicons
       name="add"
@@ -1419,11 +1730,42 @@ onPress={() =>
 )}
 
         {tab === 'Schedule' && (
-          <View>
+  <View
+    pointerEvents={
+      loadingSchedule || scheduleLoadFailed || savingSchedule
+        ? 'none'
+        : 'auto'
+    }
+  >
             <Text style={styles.scheduleDescription}>
               Set your weekly availability. Clients can only book during your open hours.
             </Text>
-
+{/* Saves the whole weekly schedule after reviewing the days and times. */}
+<Pressable
+  onPress={saveSchedule}
+  disabled={loadingSchedule || scheduleLoadFailed || savingSchedule}
+  style={{
+    backgroundColor: COLORS.primary,
+    paddingVertical: 12,
+    borderRadius: 12,
+    alignItems: 'center',
+    marginBottom: 16,
+    opacity:
+      loadingSchedule || scheduleLoadFailed || savingSchedule
+        ? 0.5
+        : 1,
+  }}
+>
+  <Text style={{ color: '#FFFFFF', fontWeight: '700' }}>
+    {loadingSchedule
+      ? 'Loading schedule…'
+      : scheduleLoadFailed
+      ? 'Reopen screen to load schedule'
+      : savingSchedule
+      ? 'Saving…'
+      : 'Save Schedule'}
+  </Text>
+</Pressable>
             {days.map((day) => {
               const available = availableDays.includes(day);
 

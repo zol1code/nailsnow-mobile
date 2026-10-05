@@ -176,17 +176,110 @@ const { data, error } = await supabase
 
   loadDesignerServices();
 }, [designerId]);
-// Allows continuation only when the selected service
-// is still present in the loaded active services.
+type AvailabilityRow = {
+  day_of_week: number;
+  is_available: boolean;
+  start_time: string;
+  end_time: string;
+};
+
+const [availability, setAvailability] = useState<AvailabilityRow[]>([]);
+const [loadingAvailability, setLoadingAvailability] = useState(true);
+const [availabilityFailed, setAvailabilityFailed] = useState(false);
+
+// Loads the selected designer's actual weekly availability.
+useEffect(() => {
+  let active = true;
+
+  setAvailability([]);
+  setLoadingAvailability(true);
+  setAvailabilityFailed(false);
+  setDate('');
+  setTime('');
+
+  async function loadAvailability() {
+    try {
+      if (!designerId) throw new Error('Missing designer ID.');
+
+      const { data, error } = await supabase
+        .from('designer_availability')
+        .select('day_of_week, is_available, start_time, end_time')
+        .eq('designer_id', designerId);
+
+      if (error) throw error;
+
+      if (active) setAvailability(data ?? []);
+    } catch (error) {
+      console.log('Booking availability error:', error);
+      if (active) setAvailabilityFailed(true);
+    } finally {
+      if (active) setLoadingAvailability(false);
+    }
+  }
+
+  loadAvailability();
+
+  return () => {
+    active = false;
+  };
+}, [designerId]);
+
+// Reads the weekday without changing the displayed date.
+function scheduleForDate(dateValue: string) {
+  if (!dateValue) return undefined;
+
+  const [year, month, day] = dateValue.split('-').map(Number);
+  const weekday = new Date(year, month - 1, day).getDay();
+
+  return availability.find((row) => row.day_of_week === weekday);
+}
+
+function isDateOpen(dateValue: string) {
+  return (
+    !loadingAvailability &&
+    !availabilityFailed &&
+    scheduleForDate(dateValue)?.is_available === true
+  );
+}
+
+// Includes seconds so the entire service must fit before closing.
+function timeInSeconds(value: string) {
+  const [hours, minutes, seconds = 0] = value.split(':').map(Number);
+
+  return hours * 3600 + minutes * 60 + seconds;
+}
+
+function isTimeAvailable(timeValue: string) {
+  if (!service || !isDateOpen(date)) return false;
+
+  const schedule = scheduleForDate(date);
+  if (!schedule || !Number.isFinite(service.duration) || service.duration <= 0) {
+    return false;
+  }
+
+  const start = timeInSeconds(timeValue);
+  const finish = start + service.duration * 60;
+
+  return (
+    start >= timeInSeconds(schedule.start_time) &&
+    finish <= timeInSeconds(schedule.end_time)
+  );
+}
+
+// Clears the previous time when the date or service changes.
+useEffect(() => {
+  setTime('');
+}, [date, service?.id, service?.duration]);
+
 const ready = Boolean(
   service &&
   realServices.some((item) => item.id === service.id) &&
-  date &&
-  time
+  DAYS.some((item) => item.value === date) &&
+  TIME_SLOTS.some((item) => item.value === time) &&
+  isTimeAvailable(time)
 );
   function continueToPayment() {
-    if (!service || !date || !time) {
-      return;
+if (!ready || !service) {      return;
     }
 
     router.push({
@@ -320,10 +413,12 @@ const ready = Boolean(
     <Pressable
       key={item.value}
       style={[
-        styles.dateCard,
-        selected && styles.dateCardSelected,
-      ]}
-      onPress={() => setDate(item.value)}
+  styles.dateCard,
+  selected && styles.dateCardSelected,
+  !isDateOpen(item.value) && { opacity: 0.35 },
+]}
+disabled={!isDateOpen(item.value)}
+onPress={() => setDate(item.value)}
     >
       <Text
         style={[
@@ -352,7 +447,19 @@ const ready = Boolean(
           <Text style={styles.sectionTitle}>
             Select Time
           </Text>
-
+<Text style={[styles.durationText, { marginBottom: 12 }]}>
+  {loadingAvailability
+    ? 'Loading availability…'
+    : availabilityFailed
+    ? 'Could not load availability. Please reopen this screen.'
+    : availability.length === 0
+    ? 'This artist has not published availability yet.'
+    : !service || !date
+    ? 'Select a service and an available date.'
+    : !TIME_SLOTS.some((slot) => isTimeAvailable(slot.value))
+    ? 'No times fit this service on the selected day.'
+    : 'Choose an available time.'}
+</Text>
           <View style={styles.timeGrid}>
   {TIME_SLOTS.map((item) => {
     // Compares the PostgreSQL-compatible time value.
@@ -361,12 +468,13 @@ const ready = Boolean(
     return (
       <Pressable
         key={item.value}
-        style={[
-          styles.timeButton,
-          selected && styles.timeButtonSelected,
-        ]}
-        // Stores the database-compatible time.
-        onPress={() => setTime(item.value)}
+       style={[
+  styles.timeButton,
+  selected && styles.timeButtonSelected,
+  !isTimeAvailable(item.value) && { opacity: 0.35 },
+]}
+disabled={!isTimeAvailable(item.value)}
+onPress={() => setTime(item.value)}
       >
         <Text
           style={[
