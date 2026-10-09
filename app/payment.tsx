@@ -230,6 +230,11 @@ if (error.code === '23P01') {
     'Service updated',
     'The service details have changed. Please go back and select the service again to review the current price and duration.'
   );
+} else if (error.code === 'P1004') {
+  Alert.alert(
+    'Time already passed',
+    'This appointment time has already passed. Please go back and choose a future date and time.'
+  );
 } else if (error.code === 'P1003') {
   Alert.alert(
     'Outside working hours',

@@ -1,6 +1,10 @@
 import { Ionicons } from '@expo/vector-icons';
-import { router, useLocalSearchParams } from 'expo-router';
-import { useEffect, useState } from 'react';
+import {
+  router,
+  useFocusEffect,
+  useLocalSearchParams,
+} from 'expo-router';
+import { useCallback, useEffect, useState } from 'react';
 import {
   Pressable,
   ScrollView,
@@ -130,8 +134,39 @@ const designerId = String(params.id ?? '');
 console.log('BOOKING DESIGNER ID:', designerId);
 // Keeps the mock designer temporarily as a visual fallback
 // while the Booking screen is being migrated to Supabase.
-const designer = DESIGNERS[0];
+// Stores the selected designer's real name.
+const [designerName, setDesignerName] = useState('');
 
+useEffect(() => {
+  let active = true;
+  setDesignerName('');
+
+  async function loadDesignerName() {
+    if (!designerId) return;
+
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('name')
+      .eq('id', designerId)
+      .eq('user_type', 'designer')
+      .maybeSingle();
+
+    if (error) {
+      console.log('Booking designer profile error:', error.message);
+      return;
+    }
+
+    if (active) {
+      setDesignerName(data?.name?.trim() ?? '');
+    }
+  }
+
+  void loadDesignerName();
+
+  return () => {
+    active = false;
+  };
+}, [designerId]);
 // Structure of a real service loaded from Supabase.
 type RealService = {
   id: number;
@@ -146,6 +181,89 @@ type RealService = {
 const [realServices, setRealServices] = useState<RealService[]>([]);
   const [date, setDate] = useState('');
   const [time, setTime] = useState('');
+
+  type BookingTimeSlot = {
+  slot_time: string;
+  is_available: boolean;
+};
+
+const [bookingSlots, setBookingSlots] = useState<{
+  key: string;
+  rows: BookingTimeSlot[];
+}>({ key: '', rows: [] });
+
+const [loadingSlots, setLoadingSlots] = useState(false);
+const [slotsFailed, setSlotsFailed] = useState(false);
+
+// Allows retrying availability for the same selected date.
+const [slotsRefresh, setSlotsRefresh] = useState(0);
+
+// Identifies which designer, service and date these results belong to.
+const slotsKey = `${designerId}|${service?.id ?? ''}|${date}`;
+const selectedServiceId = service?.id;
+const selectedServiceDuration = service?.duration;
+
+// Refreshes occupied times whenever this screen becomes active.
+useFocusEffect(
+  useCallback(() => {
+    let active = true;
+
+    setTime('');
+    setBookingSlots({ key: '', rows: [] });
+    setSlotsFailed(false);
+
+    if (!designerId || selectedServiceId == null || !date) {
+      setLoadingSlots(false);
+      return;
+    }
+
+    const serviceIdToLoad = selectedServiceId;
+    setLoadingSlots(true);
+
+    async function loadBookingSlots() {
+      try {
+        const { data, error } = await supabase.rpc(
+          'get_booking_time_slots',
+          {
+            p_designer_id: designerId,
+            p_service_id: serviceIdToLoad,
+            p_date: date,
+          }
+        );
+
+        if (error) throw error;
+
+        if (active) {
+          setBookingSlots({
+            key: slotsKey,
+            rows: (data ?? []) as BookingTimeSlot[],
+          });
+        }
+      } catch (error) {
+        console.log('Booking time slots error:', error);
+
+        if (active) setSlotsFailed(true);
+      } finally {
+        if (active) setLoadingSlots(false);
+      }
+    }
+
+    void loadBookingSlots();
+
+    // Ignores responses after leaving or changing the selection.
+    return () => {
+      active = false;
+    };
+  }, [
+    designerId,
+    selectedServiceId,
+    selectedServiceDuration,
+    date,
+    slotsKey,
+    slotsRefresh,
+  ])
+);
+
 // Loads the selected designer's real services from Supabase.
 useEffect(() => {
   const loadDesignerServices = async () => {
@@ -250,19 +368,42 @@ function timeInSeconds(value: string) {
 }
 
 function isTimeAvailable(timeValue: string) {
-  if (!service || !isDateOpen(date)) return false;
+  if (
+    !service ||
+    !isDateOpen(date) ||
+    loadingSlots ||
+    slotsFailed ||
+    bookingSlots.key !== slotsKey
+  ) {
+    return false;
+  }
 
   const schedule = scheduleForDate(date);
-  if (!schedule || !Number.isFinite(service.duration) || service.duration <= 0) {
+
+  if (
+    !schedule ||
+    !Number.isFinite(service.duration) ||
+    service.duration <= 0
+  ) {
     return false;
   }
 
   const start = timeInSeconds(timeValue);
   const finish = start + service.duration * 60;
 
-  return (
-    start >= timeInSeconds(schedule.start_time) &&
-    finish <= timeInSeconds(schedule.end_time)
+  // Requires the full service to fit within working hours.
+  if (
+    start < timeInSeconds(schedule.start_time) ||
+    finish > timeInSeconds(schedule.end_time)
+  ) {
+    return false;
+  }
+
+  // Requires Supabase to confirm that this slot is free.
+  return bookingSlots.rows.some(
+    (slot) =>
+      timeInSeconds(slot.slot_time) === start &&
+      slot.is_available === true
   );
 }
 
@@ -322,7 +463,7 @@ if (!ready || !service) {      return;
           </Text>
 
           <Text style={styles.subtitle}>
-            with {designer.name}
+            with {designerName || 'Nail artist'}
           </Text>
         </View>
       </View>
@@ -418,8 +559,10 @@ if (!ready || !service) {      return;
   !isDateOpen(item.value) && { opacity: 0.35 },
 ]}
 disabled={!isDateOpen(item.value)}
-onPress={() => setDate(item.value)}
-    >
+onPress={() => {
+  setDate(item.value);
+  setSlotsRefresh((current) => current + 1);
+}}    >
       <Text
         style={[
           styles.dateDay,
@@ -456,10 +599,15 @@ onPress={() => setDate(item.value)}
     ? 'This artist has not published availability yet.'
     : !service || !date
     ? 'Select a service and an available date.'
+    : slotsFailed
+    ? 'Could not check available times. Please select the date again.'
+    : loadingSlots || bookingSlots.key !== slotsKey
+    ? 'Checking available times…'
     : !TIME_SLOTS.some((slot) => isTimeAvailable(slot.value))
-    ? 'No times fit this service on the selected day.'
+    ? 'No available times for this service on the selected day.'
     : 'Choose an available time.'}
-</Text>
+</Text>  
+
           <View style={styles.timeGrid}>
   {TIME_SLOTS.map((item) => {
     // Compares the PostgreSQL-compatible time value.
