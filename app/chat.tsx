@@ -1,8 +1,9 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
+  Alert,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -88,101 +89,264 @@ const designer = {
       : undefined,
 };
 
-const [messages, setMessages] = useState<Message[]>([]);  const [input, setInput] = useState('');
-// Carrega somente as mensagens deste agendamento.
-useEffect(() => {
-  const appointmentId = params.appointmentId;
+const [messages, setMessages] = useState<Message[]>([]);
+const [input, setInput] = useState('');
+const [isSending, setIsSending] = useState(false);
+const [loadingMessages, setLoadingMessages] = useState(true);
+const [chatError, setChatError] = useState('');
+const [retryCount, setRetryCount] = useState(0);
 
-  if (typeof appointmentId !== 'string') {
+const sendingRef = useRef(false);
+const screenVersion = useRef(0);
+
+const appointmentId =
+  typeof params.appointmentId === 'string'
+    ? params.appointmentId
+    : '';
+
+useEffect(() => {
+  let active = true;
+  const version = ++screenVersion.current;
+
+  setMessages([]);
+  setInput('');
+  setChatError('');
+  setLoadingMessages(true);
+  setIsSending(false);
+  sendingRef.current = false;
+
+  if (!appointmentId) {
+    setChatError('Open this chat from an appointment.');
+    setLoadingMessages(false);
     return;
   }
 
-  async function loadMessages() {
+  type ChatRow = {
+    id: string;
+    sender_id: string;
+    body: string;
+    created_at: string;
+  };
+
+  const rows = new Map<string, ChatRow>();
+  let currentUserId = '';
+
+  // Merges history and live messages using their real database IDs.
+  function mergeMessages(incoming: ChatRow[]) {
+    if (!active || screenVersion.current !== version) return;
+
+    for (const row of incoming) {
+      rows.set(row.id, row);
+    }
+
+    setMessages(
+      [...rows.values()]
+        .sort(
+          (a, b) =>
+            a.created_at.localeCompare(b.created_at) ||
+            a.id.localeCompare(b.id)
+        )
+        .map((row) => ({
+          id: row.id,
+          sender: row.sender_id === currentUserId ? 'me' : 'them',
+          text: row.body,
+          time: new Date(row.created_at).toLocaleTimeString([], {
+            hour: '2-digit',
+            minute: '2-digit',
+          }),
+        }))
+    );
+  }
+
+  async function loadHistory() {
+    try {
+      // Loads every page instead of silently cutting off older messages.
+      let offset = 0;
+
+      while (active) {
+        const { data, error } = await supabase
+          .from('chat_messages')
+          .select('id, sender_id, body, created_at')
+          .eq('appointment_id', appointmentId)
+          .order('created_at', { ascending: true })
+          .order('id', { ascending: true })
+          .range(offset, offset + 199);
+
+        if (error) throw error;
+        if (!active) return;
+
+        const page = (data ?? []) as ChatRow[];
+        mergeMessages(page);
+
+        if (page.length < 200) break;
+        offset += page.length;
+      }
+
+      if (active) setChatError('');
+    } catch (error) {
+      console.log('Chat history error:', error);
+
+      if (active) {
+        setChatError('Could not load messages. Tap to reconnect.');
+      }
+    } finally {
+      if (active) setLoadingMessages(false);
+    }
+  }
+
+  const channel = supabase
+    .channel(`appointment-chat:${appointmentId}:${version}`)
+    .on(
+      'postgres_changes',
+      {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'chat_messages',
+        filter: `appointment_id=eq.${appointmentId}`,
+      },
+      (payload) => {
+        if (currentUserId) {
+          mergeMessages([payload.new as ChatRow]);
+        }
+      }
+    )
+    .subscribe((status) => {
+      if (!active) return;
+
+      if (status === 'SUBSCRIBED' && currentUserId) {
+        void loadHistory();
+      } else if (
+        status === 'CHANNEL_ERROR' ||
+        status === 'TIMED_OUT' ||
+        status === 'CLOSED'
+      ) {
+        setChatError('Connection interrupted. Tap to reconnect.');
+      }
+    });
+
+  async function openChat() {
+    try {
+      const {
+        data: { user },
+        error,
+      } = await supabase.auth.getUser();
+
+      if (error) throw error;
+      if (!user) throw new Error('Not signed in.');
+      if (!active) return;
+
+      currentUserId = user.id;
+
+      // Confirms access even when the conversation has no messages yet.
+      const { data: appointment, error: appointmentError } =
+        await supabase
+          .from('appointments')
+          .select('id')
+          .eq('id', appointmentId)
+          .maybeSingle();
+
+      if (appointmentError) throw appointmentError;
+      if (!appointment) throw new Error('Appointment unavailable.');
+      if (!active) return;
+
+      await loadHistory();
+    } catch (error) {
+      console.log('Open chat error:', error);
+
+      if (active) {
+        setLoadingMessages(false);
+        setChatError(
+          'Could not open this conversation. Tap to try again.'
+        );
+      }
+    }
+  }
+
+  void openChat();
+
+  return () => {
+    active = false;
+    ++screenVersion.current;
+    void supabase.removeChannel(channel);
+  };
+}, [appointmentId, retryCount]);
+
+async function send() {
+  const text = input.trim();
+
+  if (
+    !text ||
+    !appointmentId ||
+    loadingMessages ||
+    sendingRef.current
+  ) {
+    return;
+  }
+
+  const version = screenVersion.current;
+  sendingRef.current = true;
+  setIsSending(true);
+
+  try {
     const {
       data: { user },
       error: userError,
     } = await supabase.auth.getUser();
 
-    if (userError || !user) {
-      console.log('Chat user error:', userError?.message);
-      return;
-    }
+    if (userError) throw userError;
+    if (!user) throw new Error('Not signed in.');
+
+    // Stops a request if this conversation has already been closed.
+    if (screenVersion.current !== version) return;
 
     const { data, error } = await supabase
       .from('chat_messages')
-      .select('id, sender_id, body, created_at')
-      .eq('appointment_id', appointmentId)
-      .order('created_at', { ascending: true });
+      .insert({
+        appointment_id: appointmentId,
+        sender_id: user.id,
+        body: text,
+      })
+      .select('id, body, created_at')
+      .single();
 
-    if (error) {
-      console.log('Load messages error:', error.message);
-      return;
-    }
+    if (error) throw error;
+    if (screenVersion.current !== version) return;
 
-    setMessages(
-      (data ?? []).map((item) => ({
-        id: item.id,
-        sender: item.sender_id === user.id ? 'me' : 'them',
-        text: item.body,
-        time: new Date(item.created_at).toLocaleTimeString([], {
-          hour: '2-digit',
-          minute: '2-digit',
-        }),
-      }))
+    // The live event may arrive before this response.
+    // Keeps only one copy of the saved message.
+    setMessages((current) =>
+      current.some((message) => message.id === data.id)
+        ? current
+        : [
+            ...current,
+            {
+              id: data.id,
+              sender: 'me',
+              text: data.body,
+              time: new Date(data.created_at).toLocaleTimeString([], {
+                hour: '2-digit',
+                minute: '2-digit',
+              }),
+            },
+          ]
     );
+
+    setInput('');
+  } catch (error) {
+    console.log('Send message error:', error);
+
+    if (screenVersion.current === version) {
+      Alert.alert(
+        'Message not confirmed',
+        'Reconnect to check whether your message arrived before sending it again.'
+      );
+    }
+  } finally {
+    if (screenVersion.current === version) {
+      sendingRef.current = false;
+      setIsSending(false);
+    }
   }
-
-  loadMessages();
-}, [params.appointmentId]);
-async function send() {
-  const text = input.trim();
-  const appointmentId = params.appointmentId;
-
-  // Uma mensagem precisa estar ligada a um agendamento real.
-  if (!text || typeof appointmentId !== 'string') {
-    return;
-  }
-
-  const {
-    data: { user },
-    error: userError,
-  } = await supabase.auth.getUser();
-
-  if (userError || !user) {
-    console.log('Chat user error:', userError?.message);
-    return;
-  }
-
-  // Salva a mensagem com o ID de quem está conectado.
-  const { data, error } = await supabase
-    .from('chat_messages')
-    .insert({
-      appointment_id: appointmentId,
-      sender_id: user.id,
-      body: text,
-    })
-    .select('body, created_at')
-    .single();
-
-  if (error) {
-    console.log('Send message error:', error.message);
-    return;
-  }
-
-  setMessages((current) => [
-    ...current,
-    {
-      id: Date.now(),
-      sender: 'me',
-      text: data.body,
-      time: new Date(data.created_at).toLocaleTimeString([], {
-        hour: '2-digit',
-        minute: '2-digit',
-      }),
-    },
-  ]);
-
-  setInput('');
 }
 
   return (
@@ -221,6 +385,22 @@ async function send() {
       </View>
 
       {/* Messages */}
+      {loadingMessages && (
+  <Text style={{ padding: 16, color: COLORS.mutedForeground }}>
+    Loading messages…
+  </Text>
+)}
+
+{!!chatError && (
+  <Pressable
+    onPress={() => setRetryCount((current) => current + 1)}
+    disabled={isSending}
+  >
+    <Text style={{ padding: 16, color: COLORS.primary }}>
+      {chatError}
+    </Text>
+  </Pressable>
+)}
       <ScrollView
         style={styles.messages}
         contentContainerStyle={styles.messagesContent}
@@ -290,25 +470,38 @@ async function send() {
       <View style={styles.inputArea}>
         <View style={styles.inputBox}>
           <TextInput
-            value={input}
-            onChangeText={setInput}
-            placeholder="Type a message…"
-            placeholderTextColor={COLORS.mutedForeground}
-            style={styles.input}
-            returnKeyType="send"
-            onSubmitEditing={send}
-          />
+  value={input}
+  onChangeText={setInput}
+  placeholder="Type a message…"
+  placeholderTextColor={COLORS.mutedForeground}
+  style={styles.input}
+  returnKeyType="send"
+  onSubmitEditing={send}
+  editable={!isSending && !loadingMessages && !!appointmentId}
+  maxLength={4000}
+/>
 
-          <Pressable
-            style={styles.sendButton}
-            onPress={send}
-          >
-            <Ionicons
-              name="send"
-              size={15}
-              color="#FFFFFF"
-            />
-          </Pressable>
+<Pressable
+  style={[
+    styles.sendButton,
+    (isSending || loadingMessages || !input.trim()) && {
+      opacity: 0.5,
+    },
+  ]}
+  onPress={send}
+  disabled={
+    isSending ||
+    loadingMessages ||
+    !appointmentId ||
+    !input.trim()
+  }
+>
+  <Ionicons
+    name="send"
+    size={15}
+    color="#FFFFFF"
+  />
+</Pressable>
         </View>
       </View>
     </KeyboardAvoidingView>
