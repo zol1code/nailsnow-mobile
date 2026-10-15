@@ -103,6 +103,49 @@ type RealAppointment = {
   created_at: string;
 };
 export default function AppointmentsScreen() {
+const [loadingStartCode, setLoadingStartCode] =
+  useState<string | null>(null);
+
+const [startCodes, setStartCodes] =
+  useState<Record<string, string>>({});
+
+const [startCodeError, setStartCodeError] =
+  useState<{ appointmentId: string; message: string } | null>(null);
+
+async function showStartCode(appointmentId: string) {
+  if (loadingStartCode) return;
+
+  setLoadingStartCode(appointmentId);
+  setStartCodeError(null);
+
+  try {
+    const { data, error } = await supabase.rpc(
+      'get_appointment_start_code',
+      { p_appointment_id: appointmentId }
+    );
+
+    if (error) throw error;
+
+    if (typeof data !== 'string' || !data) {
+      throw new Error('Start code unavailable.');
+    }
+
+    setStartCodes((current) => ({
+      ...current,
+      [appointmentId]: data,
+    }));
+  } catch (error) {
+    console.log('Start code error:', error);
+
+    setStartCodeError({
+      appointmentId,
+      message:
+        'Could not load the code. The appointment must still be confirmed. Please try again.',
+    });
+  } finally {
+    setLoadingStartCode(null);
+  }
+}
   const params = useLocalSearchParams();
     // Appointments loaded from the real Supabase database.
   const [realAppointments, setRealAppointments] =
@@ -578,6 +621,78 @@ const getDesignerForAppointment = (
             </Text>
           </View>
         </View>
+{appointment.status === 'confirmed' && (
+  <View style={{ marginBottom: 12 }}>
+    {startCodes[appointment.id] ? (
+      <View style={styles.infoBox}>
+        <Text style={styles.infoLabel}>
+          Your appointment start code
+        </Text>
+
+        <Text
+          selectable
+          style={[
+            styles.infoValue,
+            {
+              fontSize: 26,
+              letterSpacing: 4,
+              marginVertical: 10,
+            },
+          ]}
+        >
+          {startCodes[appointment.id]}
+        </Text>
+
+        <Text style={styles.serviceName}>
+          Share this code with your artist only when you arrive
+          and are ready to start.
+        </Text>
+
+        <Pressable
+          style={{ marginTop: 12, paddingVertical: 8 }}
+          onPress={() =>
+            setStartCodes((current) => {
+              const updated = { ...current };
+              delete updated[appointment.id];
+              return updated;
+            })
+          }
+        >
+          <Text style={styles.chatButtonText}>
+            Hide code
+          </Text>
+        </Pressable>
+      </View>
+    ) : (
+      <Pressable
+        style={[
+          styles.chatButton,
+          loadingStartCode !== null && { opacity: 0.5 },
+        ]}
+        disabled={loadingStartCode !== null}
+        onPress={() => showStartCode(appointment.id)}
+      >
+        <Text style={styles.chatButtonText}>
+          {loadingStartCode === appointment.id
+            ? 'Loading code…'
+            : 'Show start code'}
+        </Text>
+      </Pressable>
+    )}
+
+    {startCodeError?.appointmentId === appointment.id && (
+      <Text
+        style={{
+          color: COLORS.destructive,
+          marginTop: 8,
+          fontSize: 12,
+        }}
+      >
+        {startCodeError.message}
+      </Text>
+    )}
+  </View>
+)}
 
         <View style={styles.actions}>
          <Pressable

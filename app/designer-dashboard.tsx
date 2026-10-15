@@ -60,8 +60,7 @@ type DesignerService = {
   duration_minutes: number;
 };
 
-type RequestStatus = 'pending' | 'confirmed';
-
+type RequestStatus = 'pending' | 'confirmed' | 'in_progress';
 type BookingRequest = {
   // Unique ID used to track this request safely
   id: string;
@@ -758,7 +757,146 @@ const tabs = [
 ]);
 // Agendamentos reais recebidos pelo perfil da profissional no Supabase.
 const [realRequests, setRealRequests] = useState<BookingRequest[]>([]);
+const [startCodeInputs, setStartCodeInputs] =
+  useState<Record<string, string>>({});
 
+const [startingAppointmentId, setStartingAppointmentId] =
+  useState<string | null>(null);
+
+const [startFeedback, setStartFeedback] =
+  useState<Record<string, string>>({});
+
+const startAppointmentLock = useRef(false);
+
+async function startRealAppointment(appointmentId: string) {
+  if (startAppointmentLock.current) return;
+
+  const code = (startCodeInputs[appointmentId] ?? '')
+    .trim()
+    .toUpperCase();
+
+  if (!/^[0-9A-F]{8}$/.test(code)) {
+    setStartFeedback((current) => ({
+      ...current,
+      [appointmentId]: 'Enter the 8-character code shown by the customer.',
+    }));
+    return;
+  }
+
+  startAppointmentLock.current = true;
+  setStartingAppointmentId(appointmentId);
+
+  setStartFeedback((current) => ({
+    ...current,
+    [appointmentId]: '',
+  }));
+
+  try {
+    const { data, error } = await supabase.rpc(
+      'start_appointment_with_code',
+      {
+        p_appointment_id: appointmentId,
+               p_code: code,
+      }
+    );
+
+
+    if (error) throw error;
+
+    const result = data as {
+      result: string;
+      attempts_remaining?: number;
+    } | null;
+
+    if (
+      result?.result === 'started' ||
+      result?.result === 'already_started'
+    ) {
+      // Reads the current status instead of assuming it.
+      const { data: booking, error: bookingError } = await supabase
+        .from('appointments')
+        .select('status')
+        .eq('id', appointmentId)
+        .single();
+
+      if (bookingError) throw bookingError;
+
+      if (booking.status !== 'in_progress') {
+        setStartFeedback((current) => ({
+          ...current,
+          [appointmentId]:
+            'This appointment has already been started. Reopen the dashboard to check its current status.',
+        }));
+        return;
+      }
+
+      setRealRequests((current) =>
+        current.map((request) =>
+          request.appointmentId === appointmentId
+            ? { ...request, status: 'in_progress' }
+            : request
+        )
+      );
+
+      setStartCodeInputs((current) => ({
+        ...current,
+        [appointmentId]: '',
+      }));
+
+      setStartFeedback((current) => ({
+        ...current,
+        [appointmentId]: 'Appointment started successfully.',
+      }));
+
+      return;
+    }
+
+    let message = 'Could not start this appointment. Please try again.';
+
+    switch (result?.result) {
+      case 'invalid_code':
+        message =
+          `Incorrect code. ${result.attempts_remaining ?? 0} attempts remaining.`;
+        break;
+      case 'locked':
+        message =
+          'Too many incorrect attempts. Please wait 15 minutes before trying again.';
+        break;
+      case 'wrong_date':
+        message =
+          'The appointment can only start on its booked date, using Ireland time.';
+        break;
+      case 'not_confirmed':
+        message =
+          'This appointment is no longer confirmed. Reopen the dashboard.';
+        break;
+      case 'code_not_requested':
+        message =
+          'Ask the customer to tap Show start code in My Appointments first.';
+        break;
+      case 'self_booking_not_supported':
+        message =
+          'The customer and artist must use different accounts.';
+        break;
+    }
+
+    setStartFeedback((current) => ({
+      ...current,
+      [appointmentId]: message,
+    }));
+  } catch (error) {
+    console.log('Start appointment error:', error);
+
+    setStartFeedback((current) => ({
+      ...current,
+      [appointmentId]:
+        'Could not confirm the result. Reopen the dashboard to check the appointment status before trying again.',
+    }));
+  } finally {
+    startAppointmentLock.current = false;
+    setStartingAppointmentId(null);
+  }
+}
 // Confirma um agendamento real no Supabase.
 async function acceptRealRequest(appointmentId: string) {
   const {
@@ -850,8 +988,7 @@ useFocusEffect(
           'id, customer_id, service_name, appointment_date, appointment_time, status'
         )
         .eq('designer_id', user.id)
-        .in('status', ['pending', 'confirmed'])
-        .order('appointment_date', { ascending: true });
+.in('status', ['pending', 'confirmed', 'in_progress'])        .order('appointment_date', { ascending: true });
 
       if (error) {
         console.log('Designer appointments error:', error.message);
@@ -880,7 +1017,7 @@ if (customersError) {
     (customer: { customer_id: string }) =>
       customer.customer_id === item.customer_id
   )?.customer_avatar_url || '',
-            status: item.status === 'confirmed' ? 'confirmed' : 'pending',
+            status: item.status as RequestStatus,
           }))
         );
       }
@@ -1968,7 +2105,9 @@ onPress={() =>
 
                     >
                       {/* Shows the current request status based on the designer's action */}
-{acceptedRequests.includes(request.id)
+{request.status === 'in_progress'
+  ? 'In Progress'
+  : acceptedRequests.includes(request.id)
   ? 'Accepted'
   : declinedRequests.includes(request.id)
   ? 'Declined'
@@ -2138,6 +2277,67 @@ setAcceptedRequests((prev) => {
 </Pressable>
   </View>
 )}
+{request.appointmentId && request.status === 'confirmed' && (
+  <View style={{ marginVertical: 12, gap: 8 }}>
+    <Text style={styles.requestDetails}>
+      Ask the customer for their start code when they arrive.
+    </Text>
+
+    <TextInput
+      value={startCodeInputs[request.appointmentId] ?? ''}
+      onChangeText={(value) =>
+        setStartCodeInputs((current) => ({
+          ...current,
+          [request.appointmentId!]: value
+            .replace(/[^0-9a-f]/gi, '')
+            .toUpperCase(),
+        }))
+      }
+      placeholder="8-character start code"
+      placeholderTextColor={COLORS.mutedForeground}
+      autoCapitalize="characters"
+      autoCorrect={false}
+      maxLength={8}
+      editable={startingAppointmentId === null}
+      style={{
+        borderWidth: 1,
+        borderColor: COLORS.border,
+        backgroundColor: COLORS.card,
+        borderRadius: 12,
+        padding: 12,
+        color: COLORS.foreground,
+        letterSpacing: 2,
+      }}
+    />
+
+    <Pressable
+      style={[
+        styles.acceptButton,
+        startingAppointmentId !== null && { opacity: 0.5 },
+      ]}
+      disabled={startingAppointmentId !== null}
+      onPress={() => startRealAppointment(request.appointmentId!)}
+    >
+      <Text style={styles.acceptButtonText}>
+        {startingAppointmentId === request.appointmentId
+          ? 'Starting…'
+          : 'Start Appointment'}
+      </Text>
+    </Pressable>
+  </View>
+)}
+
+{request.appointmentId &&
+  !!startFeedback[request.appointmentId] && (
+    <Text
+      style={[
+        styles.requestDetails,
+        { marginVertical: 10 },
+      ]}
+    >
+      {startFeedback[request.appointmentId]}
+    </Text>
+  )}
 
 {request.appointmentId && (
   <Pressable
