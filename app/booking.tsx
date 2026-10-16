@@ -114,16 +114,14 @@ const DAYS = Array.from({ length: 7 }, (_, index) => {
 // Appointment times.
 // label = what the customer sees.
 // value = PostgreSQL-compatible time sent to Supabase.
-const TIME_SLOTS = [
-  { label: '9:00 AM', value: '09:00:00' },
-  { label: '10:00 AM', value: '10:00:00' },
-  { label: '11:00 AM', value: '11:00:00' },
-  { label: '12:00 PM', value: '12:00:00' },
-  { label: '2:00 PM', value: '14:00:00' },
-  { label: '3:00 PM', value: '15:00:00' },
-  { label: '4:00 PM', value: '16:00:00' },
-  { label: '5:00 PM', value: '17:00:00' },
-];
+// Formats a database time without changing its time zone.
+function formatSlotLabel(value: string) {
+  const [hours, minutes] = value.split(':').map(Number);
+  const period = hours >= 12 ? 'PM' : 'AM';
+  const displayHours = hours % 12 || 12;
+
+  return `${displayHours}:${String(minutes).padStart(2, '0')} ${period}`;
+}
 
 export default function BookingScreen() {
   const params = useLocalSearchParams();
@@ -202,6 +200,16 @@ const [slotsRefresh, setSlotsRefresh] = useState(0);
 const slotsKey = `${designerId}|${service?.id ?? ''}|${date}`;
 const selectedServiceId = service?.id;
 const selectedServiceDuration = service?.duration;
+
+// Uses the database results for the current selection.
+// The grid, summary and Continue button all use this same list.
+const TIME_SLOTS =
+  bookingSlots.key === slotsKey && !loadingSlots && !slotsFailed
+    ? bookingSlots.rows.map((slot) => ({
+        label: formatSlotLabel(slot.slot_time),
+        value: slot.slot_time,
+      }))
+    : [];
 
 // Refreshes occupied times whenever this screen becomes active.
 useFocusEffect(
