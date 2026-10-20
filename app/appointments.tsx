@@ -13,7 +13,7 @@ import {
 } from 'expo-router';
 
 // React hooks used to store and restore appointment data
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import {
   Alert,
@@ -21,6 +21,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View
 } from 'react-native';
 
@@ -103,6 +104,135 @@ type RealAppointment = {
   created_at: string;
 };
 export default function AppointmentsScreen() {
+  const [completionMode, setCompletionMode] = useState<
+  Record<string, 'confirm' | 'problem' | undefined>
+>({});
+
+const [problemReasons, setProblemReasons] =
+  useState<Record<string, string>>({});
+
+const [completionFeedback, setCompletionFeedback] =
+  useState<Record<string, string>>({});
+
+const [respondingCompletionId, setRespondingCompletionId] =
+  useState<string | null>(null);
+
+const completionResponseLock = useRef(false);
+
+async function respondToCompletion(
+  appointmentId: string,
+  confirm: boolean
+) {
+  if (completionResponseLock.current) return;
+
+  const reason = (problemReasons[appointmentId] ?? '').trim();
+
+  if (!confirm && (reason.length < 10 || reason.length > 2000)) {
+    setCompletionFeedback((current) => ({
+      ...current,
+      [appointmentId]: 'Describe the problem using 10 to 2,000 characters.',
+    }));
+    return;
+  }
+
+  completionResponseLock.current = true;
+  setRespondingCompletionId(appointmentId);
+  setCompletionFeedback((current) => ({
+    ...current,
+    [appointmentId]: '',
+  }));
+
+  try {
+    const { data, error } = await supabase.rpc(
+      'respond_to_appointment_completion',
+      {
+        p_appointment_id: appointmentId,
+        p_confirm: confirm,
+        p_reason: confirm ? null : reason,
+      }
+    );
+
+    if (error) throw error;
+
+    const result = data?.result;
+
+    if (
+      result !== 'completed' &&
+      result !== 'disputed' &&
+      result !== 'already_confirmed' &&
+      result !== 'already_disputed'
+    ) {
+      setCompletionFeedback((current) => ({
+        ...current,
+        [appointmentId]:
+          result === 'invalid_reason'
+            ? 'Describe the problem using 10 to 2,000 characters.'
+            : 'This appointment cannot receive this response. Reopen the screen to check its status.',
+      }));
+      return;
+    }
+
+    // Reads the saved status instead of assuming the outcome.
+    const { data: booking, error: bookingError } = await supabase
+      .from('appointments')
+      .select('status')
+      .eq('id', appointmentId)
+      .single();
+
+    if (bookingError) throw bookingError;
+
+    if (
+      booking.status !== 'completed' &&
+      booking.status !== 'disputed'
+    ) {
+      throw new Error('Unexpected appointment status.');
+    }
+
+    const savedStatus: RealAppointment['status'] = booking.status;
+
+    setRealAppointments((current) =>
+      current.map((appointment) =>
+        appointment.id === appointmentId
+          ? { ...appointment, status: savedStatus }
+          : appointment
+      )
+    );
+
+    setCompletionRequests((current) => ({
+      ...current,
+      [appointmentId]: false,
+    }));
+
+    setCompletionMode((current) => ({
+      ...current,
+      [appointmentId]: undefined,
+    }));
+
+    setProblemReasons((current) => ({
+      ...current,
+      [appointmentId]: '',
+    }));
+
+    setCompletionFeedback((current) => ({
+      ...current,
+      [appointmentId]:
+        savedStatus === 'completed'
+          ? 'You confirmed that the service was completed.'
+          : 'Your problem report was saved. The appointment is marked as disputed.',
+    }));
+  } catch (error) {
+    console.log('Customer completion response error:', error);
+
+    setCompletionFeedback((current) => ({
+      ...current,
+      [appointmentId]:
+        'Could not confirm the result. Reopen this screen to check the status before trying again.',
+    }));
+  } finally {
+    completionResponseLock.current = false;
+    setRespondingCompletionId(null);
+  }
+}
 const [loadingStartCode, setLoadingStartCode] =
   useState<string | null>(null);
 
@@ -150,6 +280,12 @@ async function showStartCode(appointmentId: string) {
     // Appointments loaded from the real Supabase database.
   const [realAppointments, setRealAppointments] =
     useState<RealAppointment[]>([]);
+    // Identifies appointments awaiting the customer's response.
+const [completionRequests, setCompletionRequests] =
+  useState<Record<string, boolean>>({});
+
+const [completionRequestsFailed, setCompletionRequestsFailed] =
+  useState(false);
 
     // Guarda os perfis das profissionais pelo ID usado nos agendamentos.
 const [designerProfiles, setDesignerProfiles] = useState<
@@ -194,9 +330,42 @@ async function loadRealAppointments() {
       return;
     }
 
-    console.log('REAL APPOINTMENTS FROM SUPABASE:', data);
-
     setRealAppointments((data ?? []) as RealAppointment[]);
+
+// Clears old results before loading this customer's requests.
+setCompletionRequests({});
+setCompletionRequestsFailed(false);
+
+const appointmentIds = (data ?? []).map((item) => item.id);
+
+if (appointmentIds.length > 0) {
+  const {
+    data: completionRows,
+    error: completionError,
+  } = await supabase
+    .from('appointment_completion_requests')
+    .select('appointment_id')
+    .in('appointment_id', appointmentIds)
+    .is('customer_confirmed_at', null)
+    .is('disputed_at', null);
+
+  if (completionError) {
+    console.log(
+      'Customer completion requests error:',
+      completionError.message
+    );
+    setCompletionRequestsFailed(true);
+  } else {
+    setCompletionRequests(
+      Object.fromEntries(
+        (completionRows ?? []).map((item) => [
+          item.appointment_id,
+          true,
+        ])
+      )
+    );
+  }
+}
     // Busca somente as profissionais presentes nos agendamentos carregados.
 const designerIds = [
   ...new Set((data ?? []).map((item) => item.designer_id)),
@@ -256,9 +425,12 @@ const getAppointmentKey = (appointment: CustomerAppointment) =>
 // Loads a previously saved appointment when this screen opens.
 // This allows the appointment to remain available after closing the app.
 // Loads real appointments from Supabase when this screen opens.
-useEffect(() => {
-  loadRealAppointments();
-}, []);
+// Refreshes real appointments whenever this screen becomes active.
+useFocusEffect(
+  useCallback(() => {
+    void loadRealAppointments();
+  }, [])
+);
 
 // Old local AsyncStorage system - kept temporarily during migration.
 
@@ -621,6 +793,153 @@ const getDesignerForAppointment = (
             </Text>
           </View>
         </View>
+
+ {appointment.status === 'in_progress' && (
+  <View style={{ marginBottom: 16, gap: 10 }}>
+    {loadingAppointments ? (
+      <Text style={styles.serviceName}>
+        Checking completion request…
+      </Text>
+    ) : completionRequestsFailed ? (
+      <Text style={styles.serviceName}>
+        Could not check completion requests. Please reopen this screen.
+      </Text>
+    ) : !completionRequests[appointment.id] ? (
+      <Text style={styles.serviceName}>
+        Your appointment is in progress. Your artist has not requested
+        completion confirmation yet.
+      </Text>
+    ) : (
+      <>
+        <Text style={styles.designerName}>
+          Your artist has requested completion confirmation.
+        </Text>
+
+        {!completionMode[appointment.id] && (
+          <>
+            <Pressable
+              style={styles.chatButton}
+              disabled={respondingCompletionId !== null}
+              onPress={() =>
+                setCompletionMode((current) => ({
+                  ...current,
+                  [appointment.id]: 'confirm',
+                }))
+              }
+            >
+              <Text style={styles.chatButtonText}>
+                Confirm Completion
+              </Text>
+            </Pressable>
+
+            <Pressable
+              style={styles.cancelButton}
+              disabled={respondingCompletionId !== null}
+              onPress={() =>
+                setCompletionMode((current) => ({
+                  ...current,
+                  [appointment.id]: 'problem',
+                }))
+              }
+            >
+              <Text style={styles.cancelButtonText}>
+                Report a Problem
+              </Text>
+            </Pressable>
+          </>
+        )}
+
+        {completionMode[appointment.id] === 'confirm' && (
+          <>
+            <Text style={styles.serviceName}>
+              Confirm only if the service has finished. If there is
+              a problem, choose Report a Problem instead.
+            </Text>
+
+            <Pressable
+              style={[
+                styles.chatButton,
+                respondingCompletionId !== null && { opacity: 0.5 },
+              ]}
+              disabled={respondingCompletionId !== null}
+              onPress={() => respondToCompletion(appointment.id, true)}
+            >
+              <Text style={styles.chatButtonText}>
+                {respondingCompletionId === appointment.id
+                  ? 'Saving…'
+                  : 'Yes, the Service Is Complete'}
+              </Text>
+            </Pressable>
+          </>
+        )}
+
+        {completionMode[appointment.id] === 'problem' && (
+          <>
+            <TextInput
+              value={problemReasons[appointment.id] ?? ''}
+              onChangeText={(value) =>
+                setProblemReasons((current) => ({
+                  ...current,
+                  [appointment.id]: value,
+                }))
+              }
+              placeholder="Describe what happened (10–2,000 characters)"
+              placeholderTextColor={COLORS.mutedForeground}
+              multiline
+              maxLength={2000}
+              editable={respondingCompletionId === null}
+              style={{
+                minHeight: 100,
+                padding: 12,
+                borderWidth: 1,
+                borderColor: COLORS.border,
+                borderRadius: 12,
+                color: COLORS.foreground,
+                backgroundColor: COLORS.card,
+                textAlignVertical: 'top',
+              }}
+            />
+
+            <Pressable
+              style={[
+                styles.cancelButton,
+                respondingCompletionId !== null && { opacity: 0.5 },
+              ]}
+              disabled={respondingCompletionId !== null}
+              onPress={() => respondToCompletion(appointment.id, false)}
+            >
+              <Text style={styles.cancelButtonText}>
+                {respondingCompletionId === appointment.id
+                  ? 'Saving…'
+                  : 'Submit Problem Report'}
+              </Text>
+            </Pressable>
+          </>
+        )}
+
+        {!!completionMode[appointment.id] && (
+          <Pressable
+            disabled={respondingCompletionId !== null}
+            onPress={() =>
+              setCompletionMode((current) => ({
+                ...current,
+                [appointment.id]: undefined,
+              }))
+            }
+          >
+            <Text style={styles.chatButtonText}>Go Back</Text>
+          </Pressable>
+        )}
+      </>
+    )}
+  </View>
+)}
+
+{!!completionFeedback[appointment.id] && (
+  <Text style={[styles.serviceName, { marginBottom: 12 }]}>
+    {completionFeedback[appointment.id]}
+  </Text>
+)}       
 {appointment.status === 'confirmed' && (
   <View style={{ marginBottom: 12 }}>
     {startCodes[appointment.id] ? (

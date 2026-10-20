@@ -757,6 +757,68 @@ const tabs = [
 ]);
 // Agendamentos reais recebidos pelo perfil da profissional no Supabase.
 const [realRequests, setRealRequests] = useState<BookingRequest[]>([]);
+const [completionRequested, setCompletionRequested] =
+  useState<Record<string, boolean>>({});
+
+const [completionLoading, setCompletionLoading] = useState(true);
+const [completionLoadFailed, setCompletionLoadFailed] = useState(false);
+
+const [requestingCompletionId, setRequestingCompletionId] =
+  useState<string | null>(null);
+
+const [completionFeedback, setCompletionFeedback] =
+  useState<Record<string, string>>({});
+
+const completionRequestLock = useRef(false);
+
+async function requestCompletion(appointmentId: string) {
+  if (completionRequestLock.current) return;
+
+  completionRequestLock.current = true;
+  setRequestingCompletionId(appointmentId);
+
+  setCompletionFeedback((current) => ({
+    ...current,
+    [appointmentId]: '',
+  }));
+
+  try {
+    const { data, error } = await supabase.rpc(
+      'request_appointment_completion',
+      { p_appointment_id: appointmentId }
+    );
+
+    if (error) throw error;
+
+    if (data?.result === 'awaiting_customer_confirmation') {
+      setCompletionRequested((current) => ({
+        ...current,
+        [appointmentId]: true,
+      }));
+      return;
+    }
+
+    setCompletionFeedback((current) => ({
+      ...current,
+      [appointmentId]:
+        data?.result === 'start_not_verified'
+          ? 'The appointment must first be started using the customer code.'
+          : 'This appointment is no longer in progress. Reopen the dashboard.',
+    }));
+  } catch (error) {
+    console.log('Completion request error:', error);
+
+    setCompletionFeedback((current) => ({
+      ...current,
+      [appointmentId]:
+        'Could not confirm the result. Reopen the dashboard to check before trying again.',
+    }));
+  } finally {
+    completionRequestLock.current = false;
+    setRequestingCompletionId(null);
+  }
+}
+
 const [startCodeInputs, setStartCodeInputs] =
   useState<Record<string, string>>({});
 
@@ -972,6 +1034,8 @@ useFocusEffect(
     let active = true;
 
     async function loadRealRequests() {
+      setCompletionLoading(true);
+setCompletionLoadFailed(false);
       const {
         data: { user },
         error: userError,
@@ -994,6 +1058,37 @@ useFocusEffect(
         console.log('Designer appointments error:', error.message);
         return;
       }
+      // Restores completion requests when the dashboard reopens.
+const appointmentIds = (data ?? []).map((item) => item.id);
+
+let requestedById: Record<string, boolean> = {};
+let completionQueryFailed = false;
+
+if (appointmentIds.length > 0) {
+  const { data: completionRows, error: completionError } =
+    await supabase
+      .from('appointment_completion_requests')
+      .select('appointment_id')
+      .in('appointment_id', appointmentIds);
+
+  if (completionError) {
+    console.log('Load completion requests error:', completionError.message);
+    completionQueryFailed = true;
+  } else {
+    requestedById = Object.fromEntries(
+      (completionRows ?? []).map((item) => [
+        item.appointment_id,
+        true,
+      ])
+    );
+  }
+}
+
+if (active) {
+  setCompletionRequested(requestedById);
+  setCompletionLoadFailed(completionQueryFailed);
+  setCompletionLoading(false);
+}
     // Busca nome e foto somente dos clientes com agendamento desta profissional.
 const { data: bookingCustomers, error: customersError } =
   await supabase.rpc('get_booking_customers');
@@ -2338,6 +2433,50 @@ setAcceptedRequests((prev) => {
       {startFeedback[request.appointmentId]}
     </Text>
   )}
+{request.appointmentId && request.status === 'in_progress' && (
+  <View style={{ marginVertical: 12, gap: 8 }}>
+    {completionLoading ? (
+      <Text style={styles.requestDetails}>
+        Checking completion request…
+      </Text>
+    ) : completionLoadFailed ? (
+      <Text style={styles.requestDetails}>
+        Could not check completion requests. Please reopen the dashboard.
+      </Text>
+    ) : completionRequested[request.appointmentId] ? (
+      <Text style={styles.requestDetails}>
+        Completion requested. Awaiting customer confirmation.
+      </Text>
+    ) : (
+      <>
+        <Text style={styles.requestDetails}>
+          When the service is finished, ask the customer to confirm completion.
+        </Text>
+
+        <Pressable
+          style={[
+            styles.acceptButton,
+            requestingCompletionId !== null && { opacity: 0.5 },
+          ]}
+          disabled={requestingCompletionId !== null}
+          onPress={() => requestCompletion(request.appointmentId!)}
+        >
+          <Text style={styles.acceptButtonText}>
+            {requestingCompletionId === request.appointmentId
+              ? 'Requesting…'
+              : 'Request Completion'}
+          </Text>
+        </Pressable>
+      </>
+    )}
+
+    {!!completionFeedback[request.appointmentId] && (
+      <Text style={styles.requestDetails}>
+        {completionFeedback[request.appointmentId]}
+      </Text>
+    )}
+  </View>
+)}
 
 {request.appointmentId && (
   <Pressable
