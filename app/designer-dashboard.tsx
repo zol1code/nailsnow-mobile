@@ -60,8 +60,12 @@ type DesignerService = {
   duration_minutes: number;
 };
 
-type RequestStatus = 'pending' | 'confirmed' | 'in_progress';
-type BookingRequest = {
+type RequestStatus =
+  | 'pending'
+  | 'confirmed'
+  | 'in_progress'
+  | 'completed'
+  | 'disputed';type BookingRequest = {
   // Unique ID used to track this request safely
   id: string;
   // ID real do agendamento no Supabase; os cartões de exemplo não têm esse ID.
@@ -759,7 +763,8 @@ const tabs = [
 const [realRequests, setRealRequests] = useState<BookingRequest[]>([]);
 const [completionRequested, setCompletionRequested] =
   useState<Record<string, boolean>>({});
-
+const [disputeReasons, setDisputeReasons] =
+  useState<Record<string, string>>({});
 const [completionLoading, setCompletionLoading] = useState(true);
 const [completionLoadFailed, setCompletionLoadFailed] = useState(false);
 
@@ -1052,7 +1057,14 @@ setCompletionLoadFailed(false);
           'id, customer_id, service_name, appointment_date, appointment_time, status'
         )
         .eq('designer_id', user.id)
-.in('status', ['pending', 'confirmed', 'in_progress'])        .order('appointment_date', { ascending: true });
+.in('status', [
+  'pending',
+  'confirmed',
+  'in_progress',
+  'completed',
+  'disputed',
+])    
+.order('appointment_date', { ascending: true });
 
       if (error) {
         console.log('Designer appointments error:', error.message);
@@ -1062,13 +1074,14 @@ setCompletionLoadFailed(false);
 const appointmentIds = (data ?? []).map((item) => item.id);
 
 let requestedById: Record<string, boolean> = {};
+let disputeReasonsById: Record<string, string> = {};
 let completionQueryFailed = false;
 
 if (appointmentIds.length > 0) {
   const { data: completionRows, error: completionError } =
     await supabase
       .from('appointment_completion_requests')
-      .select('appointment_id')
+      .select('appointment_id, disputed_at, dispute_reason')
       .in('appointment_id', appointmentIds);
 
   if (completionError) {
@@ -1081,11 +1094,25 @@ if (appointmentIds.length > 0) {
         true,
       ])
     );
+    // Shows only reasons attached to a recorded dispute.
+disputeReasonsById = Object.fromEntries(
+  (completionRows ?? [])
+    .filter(
+      (item) =>
+        item.disputed_at &&
+        typeof item.dispute_reason === 'string'
+    )
+    .map((item) => [
+      item.appointment_id,
+      String(item.dispute_reason),
+    ])
+);
   }
 }
 
 if (active) {
   setCompletionRequested(requestedById);
+  setDisputeReasons(disputeReasonsById);
   setCompletionLoadFailed(completionQueryFailed);
   setCompletionLoading(false);
 }
@@ -2200,12 +2227,12 @@ onPress={() =>
 
                     >
                       {/* Shows the current request status based on the designer's action */}
-{request.status === 'in_progress'
+{request.status === 'completed'
+  ? 'Completed'
+  : request.status === 'disputed'
+  ? 'Disputed'
+  : request.status === 'in_progress'
   ? 'In Progress'
-  : acceptedRequests.includes(request.id)
-  ? 'Accepted'
-  : declinedRequests.includes(request.id)
-  ? 'Declined'
   : request.status === 'confirmed'
   ? 'Confirmed'
   : 'Pending'}
@@ -2477,7 +2504,35 @@ setAcceptedRequests((prev) => {
     )}
   </View>
 )}
+{request.appointmentId && request.status === 'disputed' && (
+  <View
+    style={{
+      marginVertical: 12,
+      padding: 12,
+      borderRadius: 12,
+      backgroundColor: COLORS.muted,
+      gap: 8,
+    }}
+  >
+    <Text style={styles.requestClient}>
+      Customer problem report
+    </Text>
 
+    <Text selectable style={styles.requestDetails}>
+      {completionLoading
+        ? 'Loading report…'
+        : completionLoadFailed
+        ? 'Could not load the report. Please reopen the dashboard.'
+        : disputeReasons[request.appointmentId] ||
+          'The report details are unavailable. Please reopen the dashboard.'}
+    </Text>
+
+    <Text style={styles.requestDetails}>
+      A problem has been reported. This status does not confirm a refund
+      or a decision about the report.
+    </Text>
+  </View>
+)}
 {request.appointmentId && (
   <Pressable
     style={styles.acceptButton}
