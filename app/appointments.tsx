@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { supabase } from '../lib/supabase';
+import AppointmentReschedule from '../components/AppointmentReschedule';
 
 // Stores appointments locally so they remain available after closing the app
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -242,8 +243,20 @@ const [startCodes, setStartCodes] =
 const [startCodeError, setStartCodeError] =
   useState<{ appointmentId: string; message: string } | null>(null);
 
+const startCodeVersion = useRef(0);
+
+// Clears codes that may have been invalidated by rescheduling.
+function clearStartCodeDisplay() {
+  startCodeVersion.current += 1;
+  setStartCodes({});
+  setStartCodeError(null);
+  setLoadingStartCode(null);
+}
+
 async function showStartCode(appointmentId: string) {
   if (loadingStartCode) return;
+
+  const version = startCodeVersion.current;
 
   setLoadingStartCode(appointmentId);
   setStartCodeError(null);
@@ -256,6 +269,9 @@ async function showStartCode(appointmentId: string) {
 
     if (error) throw error;
 
+    // Ignores responses received after leaving or refreshing.
+    if (version !== startCodeVersion.current) return;
+
     if (typeof data !== 'string' || !data) {
       throw new Error('Start code unavailable.');
     }
@@ -267,13 +283,17 @@ async function showStartCode(appointmentId: string) {
   } catch (error) {
     console.log('Start code error:', error);
 
+    if (version !== startCodeVersion.current) return;
+
     setStartCodeError({
       appointmentId,
       message:
         'Could not load the code. The appointment must still be confirmed. Please try again.',
     });
   } finally {
-    setLoadingStartCode(null);
+    if (version === startCodeVersion.current) {
+      setLoadingStartCode(null);
+    }
   }
 }
   const params = useLocalSearchParams();
@@ -428,7 +448,13 @@ const getAppointmentKey = (appointment: CustomerAppointment) =>
 // Refreshes real appointments whenever this screen becomes active.
 useFocusEffect(
   useCallback(() => {
+    clearStartCodeDisplay();
     void loadRealAppointments();
+
+    return () => {
+      // Ignores pending code responses after leaving this screen.
+      startCodeVersion.current += 1;
+    };
   }, [])
 );
 
@@ -1012,7 +1038,27 @@ const getDesignerForAppointment = (
     )}
   </View>
 )}
+{appointment.status === 'confirmed' && (
+  <AppointmentReschedule
+    key={`${appointment.id}-${appointment.appointment_date}-${appointment.appointment_time}`}
+    appointmentId={appointment.id}
+    status={appointment.status}
+    onChanged={async () => {
+      clearStartCodeDisplay();
+      await loadRealAppointments();
+    }}
+    onPropose={() => {
+      clearStartCodeDisplay();
 
+      router.push({
+        pathname: '/reschedule',
+        params: {
+          appointmentId: appointment.id,
+        },
+      });
+    }}
+  />
+)}
         <View style={styles.actions}>
          <Pressable
   style={styles.chatButton}

@@ -3,6 +3,7 @@ import { Image } from 'expo-image';
 // Runs synchronization logic whenever the dashboard becomes active
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import AppointmentReschedule from '../components/AppointmentReschedule';
 import {
   Alert,
   Pressable,
@@ -834,7 +835,68 @@ const [startFeedback, setStartFeedback] =
   useState<Record<string, string>>({});
 
 const startAppointmentLock = useRef(false);
+// Reloads the appointment after a reschedule response.
+async function refreshRescheduledRequest(appointmentId: string) {
+  // Removes any code entered for the previous booking time.
+  setStartCodeInputs((current) => {
+    const updated = { ...current };
+    delete updated[appointmentId];
+    return updated;
+  });
 
+  setStartFeedback((current) => {
+    const updated = { ...current };
+    delete updated[appointmentId];
+    return updated;
+  });
+
+  const {
+    data: { user },
+    error: authError,
+  } = await supabase.auth.getUser();
+
+  if (authError) throw authError;
+  if (!user) throw new Error('Please sign in again.');
+
+  const { data: booking, error } = await supabase
+    .from('appointments')
+    .select('id, appointment_date, appointment_time, status')
+    .eq('id', appointmentId)
+    .eq('designer_id', user.id)
+    .single();
+
+  if (error) throw error;
+
+  const visibleStatuses: string[] = [
+    'pending',
+    'confirmed',
+    'in_progress',
+    'completed',
+    'disputed',
+  ];
+
+  if (!visibleStatuses.includes(booking.status)) {
+    setRealRequests((current) =>
+      current.filter(
+        (request) => request.appointmentId !== appointmentId
+      )
+    );
+    return;
+  }
+
+  setRealRequests((current) =>
+    current.map((request) =>
+      request.appointmentId === appointmentId
+        ? {
+            ...request,
+            date:
+              `${booking.appointment_date} · ${booking.appointment_time}`,
+            status: booking.status as RequestStatus,
+          }
+        : request
+    )
+  );
+}
 async function startRealAppointment(appointmentId: string) {
   if (startAppointmentLock.current) return;
 
@@ -1039,6 +1101,8 @@ useFocusEffect(
     let active = true;
 
     async function loadRealRequests() {
+      setStartCodeInputs({});
+setStartFeedback({});
       setCompletionLoading(true);
 setCompletionLoadFailed(false);
       const {
@@ -2399,6 +2463,32 @@ setAcceptedRequests((prev) => {
 </Pressable>
   </View>
 )}
+
+{request.appointmentId && request.status === 'confirmed' && (
+  <AppointmentReschedule
+    key={`${request.appointmentId}-${request.date}`}
+    appointmentId={request.appointmentId}
+    status={request.status}
+    onChanged={() =>
+      refreshRescheduledRequest(request.appointmentId!)
+    }
+    onPropose={() => {
+      setStartCodeInputs((current) => {
+        const updated = { ...current };
+        delete updated[request.appointmentId!];
+        return updated;
+      });
+
+      router.push({
+        pathname: '/reschedule',
+        params: {
+          appointmentId: request.appointmentId,
+        },
+      });
+    }}
+  />
+)}
+
 {request.appointmentId && request.status === 'confirmed' && (
   <View style={{ marginVertical: 12, gap: 8 }}>
     <Text style={styles.requestDetails}>
