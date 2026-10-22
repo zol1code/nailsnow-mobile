@@ -1,5 +1,6 @@
 import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
+import DesignerPrivateAddressEditor from '../components/DesignerPrivateAddressEditor';
 import {
   Pressable,
   ScrollView,
@@ -234,12 +235,20 @@ starting_price:
           multiline
         />
 
-        <Text style={styles.label}>LOCATION</Text>
-        <TextInput
-          value={location}
-          onChangeText={setLocation}
-          style={styles.input}
-        />
+       <Text style={styles.label}>PUBLIC AREA / CITY</Text>
+
+<TextInput
+  value={location}
+  onChangeText={setLocation}
+  style={styles.input}
+  placeholder="e.g. Douglas, Cork"
+  placeholderTextColor={COLORS.mutedForeground}
+/>
+
+<Text style={{ fontSize: 12, color: COLORS.mutedForeground }}>
+  Shown publicly. Enter only your area and city.
+  Do not include your street address or Eircode.
+</Text>
         <Text style={styles.label}>INSTAGRAM</Text>
 <TextInput
   value={instagram}
@@ -278,6 +287,8 @@ starting_price:
 >
   <Text style={styles.saveButtonText}>Save Changes</Text>
 </Pressable>
+<DesignerPrivateAddressEditor />
+
 <DesignerServicesEditor />
       </View>
     </ScrollView>
