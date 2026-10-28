@@ -1,6 +1,5 @@
 import { useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
-import DesignerPrivateAddressEditor from '../components/DesignerPrivateAddressEditor';
+import { useEffect, useRef, useState } from 'react';
 import {
   Pressable,
   ScrollView,
@@ -9,6 +8,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import DesignerPrivateAddressEditor from '../components/DesignerPrivateAddressEditor';
 import DesignerServicesEditor from '../components/DesignerServicesEditor';
 // Provides access to the phone's photo library.
 import * as ImagePicker from 'expo-image-picker';
@@ -43,6 +43,79 @@ const [phone, setPhone] = useState('');
 const [startingPrice, setStartingPrice] = useState('');
   // Stores the designer's current profile photo URL.
 const [avatarUrl, setAvatarUrl] = useState('');
+const [preparingStripe, setPreparingStripe] = useState(false);
+const [stripeFeedback, setStripeFeedback] = useState('');
+const stripeLock = useRef(false);
+
+async function prepareStripeAccount() {
+  if (stripeLock.current) return;
+
+  stripeLock.current = true;
+  setPreparingStripe(true);
+  setStripeFeedback('');
+
+  try {
+    const {
+      data: { session },
+      error: sessionError,
+    } = await supabase.auth.getSession();
+
+    if (sessionError || !session) {
+      setStripeFeedback('Please sign in again.');
+      return;
+    }
+
+    const { data, error } = await supabase.functions.invoke(
+      'create-connect-account',
+      {
+        body: {},
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
+      }
+    );
+
+    if (error) {
+      let message =
+        'Could not prepare your Stripe account. Please try again later.';
+
+      // Reads the server's explanation without displaying credentials.
+      if ('context' in error && error.context instanceof Response) {
+        const responseBody = await error.context
+          .json()
+          .catch(() => null);
+
+        if (typeof responseBody?.error === 'string') {
+          message = responseBody.error;
+        }
+      }
+
+      setStripeFeedback(message);
+      return;
+    }
+
+    if (
+      data?.result !== 'account_ready' ||
+      data?.livemode !== false
+    ) {
+      setStripeFeedback(
+        'Unexpected response. Please check your account before trying again.'
+      );
+      return;
+    }
+
+    setStripeFeedback(
+      'Stripe test account prepared successfully. Bank setup is not completed yet. No real payments are enabled.'
+    );
+  } catch {
+    setStripeFeedback(
+      'Could not confirm the result. Please check your connection and try again.'
+    );
+  } finally {
+    stripeLock.current = false;
+    setPreparingStripe(false);
+  }
+}
 
   useEffect(() => {
     // Loads the current designer profile when the edit screen opens.
@@ -287,6 +360,53 @@ starting_price:
 >
   <Text style={styles.saveButtonText}>Save Changes</Text>
 </Pressable>
+<View
+  style={{
+    marginTop: 24,
+    padding: 16,
+    gap: 12,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: COLORS.card,
+  }}
+>
+  <Text
+    style={{
+      fontSize: 18,
+      fontWeight: '600',
+      color: COLORS.foreground,
+    }}
+  >
+    Payments setup
+  </Text>
+
+  <Text style={{ color: COLORS.mutedForeground }}>
+    Test mode. No real payments or bank transfers are enabled.
+  </Text>
+
+  <Pressable
+    onPress={prepareStripeAccount}
+    disabled={preparingStripe}
+    style={[
+      styles.saveButton,
+      { marginTop: 0 },
+      preparingStripe && { opacity: 0.5 },
+    ]}
+  >
+    <Text style={styles.saveButtonText}>
+      {preparingStripe
+        ? 'Preparing…'
+        : 'Prepare Stripe test account'}
+    </Text>
+  </Pressable>
+
+  {!!stripeFeedback && (
+    <Text selectable style={{ color: COLORS.foreground }}>
+      {stripeFeedback}
+    </Text>
+  )}
+</View>
 <DesignerPrivateAddressEditor />
 
 <DesignerServicesEditor />
