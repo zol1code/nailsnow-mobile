@@ -1,9 +1,9 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
+import * as WebBrowser from 'expo-web-browser';
 // Runs synchronization logic whenever the dashboard becomes active
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import AppointmentReschedule from '../components/AppointmentReschedule';
 import {
   Alert,
   Pressable,
@@ -13,6 +13,7 @@ import {
   TextInput,
   View
 } from 'react-native';
+import AppointmentReschedule from '../components/AppointmentReschedule';
 import { supabase } from '../lib/supabase';
 
 
@@ -226,6 +227,56 @@ const deleteService = async (serviceId: number) => {
   );
 };
   const [tab, setTab] = useState('Overview');
+  
+const handleSetUpPayments = async () => {
+  try {
+    Alert.alert(
+      'Stripe Payments',
+      'Preparing your secure payment setup...'
+    );
+
+    // Create or retrieve the designer's Stripe test account.
+    const { error: accountError } = await supabase.functions.invoke(
+      'create-connect-account'
+    );
+
+    if (accountError) {
+      throw accountError;
+    }
+
+    // Generate a fresh onboarding link.
+    const { data, error } = await supabase.functions.invoke(
+      'create-connect-account-link'
+    );
+
+    if (error) {
+      throw error;
+    }
+
+    if (!data?.url) {
+      throw new Error('Stripe onboarding link was not returned.');
+    }
+
+    // Open Stripe's hosted onboarding in the browser.
+    await WebBrowser.openBrowserAsync(data.url);
+
+    // Refresh the Stripe account status after returning.
+    await supabase.functions.invoke('create-connect-account');
+
+    Alert.alert(
+      'Stripe',
+      'Your payment setup status has been refreshed.'
+    );
+  } catch (error: any) {
+    console.error('Stripe onboarding error:', error);
+
+    Alert.alert(
+      'Payment setup',
+      error?.message || 'Could not open Stripe onboarding. Please try again.'
+    );
+  }
+};
+
   // Stores the logged-in designer's services loaded from Supabase.
 const [services, setServices] = useState<DesignerService[]>([]);
 // Controls whether the Add Service form is visible.
@@ -694,6 +745,7 @@ const tabs = [
   'Portfolio',
   'Schedule',
   'Requests',
+  'Payments',
 ];
   const stats = [
     {
@@ -2646,6 +2698,87 @@ setAcceptedRequests((prev) => {
 ))}
    </View>
         )}
+      
+        {tab === 'Payments' && (
+          <View
+            style={{
+              backgroundColor: '#FFFFFF',
+              borderRadius: 16,
+              padding: 20,
+              gap: 14,
+              marginBottom: 20,
+            }}
+          >
+            <View
+              style={{
+                width: 48,
+                height: 48,
+                borderRadius: 24,
+                backgroundColor: '#FBECEF',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <Ionicons
+                name="wallet-outline"
+                size={25}
+                color={COLORS.primary}
+              />
+            </View>
+
+            <Text
+              style={{
+                fontSize: 20,
+                fontWeight: '700',
+                color: COLORS.foreground,
+              }}
+            >
+              Receive Payments
+            </Text>
+
+            <Text
+              style={{
+                fontSize: 14,
+                lineHeight: 21,
+                color: COLORS.mutedForeground,
+              }}
+            >
+              Connect your Stripe account to receive secure
+              payments from your clients.
+            </Text>
+
+            <Pressable
+              onPress={handleSetUpPayments}
+              style={{
+                backgroundColor: COLORS.primary,
+                padding: 15,
+                borderRadius: 12,
+                alignItems: 'center',
+              }}
+            >
+              <Text
+                style={{
+                  color: '#FFFFFF',
+                  fontWeight: '700',
+                  fontSize: 15,
+                }}
+              >
+                Set Up Payments
+              </Text>
+            </Pressable>
+
+            <Text
+              style={{
+                fontSize: 12,
+                color: COLORS.mutedForeground,
+                textAlign: 'center',
+              }}
+            >
+              Secure onboarding powered by Stripe · Test mode
+            </Text>
+          </View>
+        )}
+
       </ScrollView>
     </View>
   );

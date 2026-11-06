@@ -10,13 +10,29 @@ const corsHeaders = {
 type Account = {
   id: string;
   object: string;
-  livemode?: boolean;
-  country?: string;
+  livemode: boolean;
   metadata?: Record<string, string>;
-  details_submitted?: boolean;
-  charges_enabled?: boolean;
-  payouts_enabled?: boolean;
-  capabilities?: { transfers?: string };
+  identity?: {
+    country?: string;
+  };
+  configuration?: {
+    merchant?: {
+      capabilities?: {
+        card_payments?: {
+          status?: string;
+        };
+      };
+    };
+    recipient?: {
+      capabilities?: {
+        stripe_balance?: {
+          stripe_transfers?: {
+            status?: string;
+          };
+        };
+      };
+    };
+  };
 };
 
 function reply(status: number, body: Record<string, unknown>) {
@@ -265,15 +281,16 @@ Deno.serve(async (request: Request) => {
       accountId = saved.stripe_account_id;
     }
 
-    // Stripe supports reading v2 accounts through the v1 format.
-    // This preserves the existing database status fields.
-    const account = await stripeRequest(
-      `v1/accounts/${encodeURIComponent(accountId)}`
-    );
+    // Retrieves the connected account using Stripe Accounts v2.
+// Includes identity and capability statuses for verification.
+  const account = await stripeRequest(
+  `v2/core/accounts/${accountId}?include[0]=identity&include[1]=configuration.merchant&include[2]=configuration.recipient&include[3]=requirements`
+);
 
- if (
+if (
   account.id !== accountId ||
-  account.country !== 'IE' ||
+  account.livemode !== false ||
+  account.identity?.country !== 'IE' ||
   account.metadata?.nailsnow_user_id !== user.id ||
   account.metadata?.nailsnow_environment !== 'test'
 ) {
@@ -282,20 +299,38 @@ Deno.serve(async (request: Request) => {
       });
     }
 
-    const capability = account.capabilities?.transfers;
+    const cardPaymentsStatus =
+  account.configuration?.merchant?.capabilities?.card_payments?.status;
 
-    const transfersStatus =
-      capability === 'active' || capability === 'pending'
-        ? capability
-        : 'inactive';
+const stripeTransfersStatus =
+  account.configuration?.recipient?.capabilities
+    ?.stripe_balance?.stripe_transfers?.status;
+
+
+ if (
+  typeof cardPaymentsStatus !== 'string' ||
+  typeof stripeTransfersStatus !== 'string' ||
+  !['active', 'pending', 'inactive'].includes(stripeTransfersStatus)
+) {
+  throw new Error('Stripe capability status unavailable or unexpected.');
+}
+   
+const chargesEnabled = cardPaymentsStatus === 'active';
+const payoutsEnabled = stripeTransfersStatus === 'active';
+
+const transfersStatus =
+  stripeTransfersStatus === 'active'
+    ? 'active'
+    : stripeTransfersStatus === 'pending'
+      ? 'pending'
+      : 'inactive';
 
     // Records only states retrieved directly from Stripe.
     const { data: updated, error: updateError } = await admin
       .from('designer_stripe_accounts')
       .update({
-        details_submitted: account.details_submitted === true,
-        charges_enabled: account.charges_enabled === true,
-        payouts_enabled: account.payouts_enabled === true,
+        charges_enabled: chargesEnabled,
+payouts_enabled: payoutsEnabled,
         transfers_status: transfersStatus,
         last_synced_at: new Date().toISOString(),
       })
@@ -310,15 +345,14 @@ Deno.serve(async (request: Request) => {
     }
 
     return reply(200, {
-      result: 'account_ready',
-      livemode: false,
-      stripe_account_id: accountId,
-      details_submitted: account.details_submitted === true,
-      charges_enabled: account.charges_enabled === true,
-      payouts_enabled: account.payouts_enabled === true,
-      transfers_status: transfersStatus,
-    });
-  } catch (error) {
+  result: 'account_ready',
+  livemode: false,
+  stripe_account_id: accountId,
+  charges_enabled: chargesEnabled,
+  payouts_enabled: payoutsEnabled,
+  transfers_status: transfersStatus,
+});
+} catch (error) {
     console.error(
       'Connect account error:',
       error instanceof Error ? error.message : 'Unexpected error'
