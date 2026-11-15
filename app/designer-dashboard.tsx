@@ -228,52 +228,97 @@ const deleteService = async (serviceId: number) => {
 };
   const [tab, setTab] = useState('Overview');
   
-const handleSetUpPayments = async () => {
-  try {
-    Alert.alert(
-      'Stripe Payments',
-      'Preparing your secure payment setup...'
-    );
+type StripePaymentStatus = 'loading' | 'not_connected' | 'pending' | 'enabled' | 'error';
+const [stripePaymentStatus, setStripePaymentStatus] = useState<StripePaymentStatus>('loading');
+const [stripeStatusMessage, setStripeStatusMessage] = useState('Checking your Stripe account...');
+const [stripeBusy, setStripeBusy] = useState(false);
+const stripeBusyLock = useRef(false);
 
-    // Create or retrieve the designer's Stripe test account.
+const loadStripePaymentStatus = useCallback(async () => {
+  try {
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError) throw authError;
+    if (!user) throw new Error('Please sign in again.');
+
+    const { data, error } = await supabase
+      .from('designer_stripe_accounts')
+      .select('stripe_account_id, charges_enabled, payouts_enabled, livemode')
+      .eq('designer_id', user.id)
+      .eq('livemode', false)
+      .maybeSingle();
+
+    if (error) throw error;
+    if (!data?.stripe_account_id) {
+      setStripePaymentStatus('not_connected');
+      setStripeStatusMessage('Stripe payments have not been set up yet.');
+    } else if (data.charges_enabled === true && data.payouts_enabled === true) {
+      setStripePaymentStatus('enabled');
+      setStripeStatusMessage('Your Stripe test account is enabled for charges and payouts.');
+    } else {
+      setStripePaymentStatus('pending');
+      setStripeStatusMessage('Your Stripe account needs additional setup or review.');
+    }
+  } catch (error) {
+    console.error('Stripe status load error:', error);
+    setStripePaymentStatus('error');
+    setStripeStatusMessage('Could not check your Stripe status. Please try again.');
+  }
+}, []);
+
+// Refresh the displayed status when returning to the dashboard.
+useFocusEffect(useCallback(() => {
+  void loadStripePaymentStatus();
+}, [loadStripePaymentStatus]));
+
+const refreshStripePaymentStatus = async () => {
+  if (stripeBusyLock.current) return;
+  stripeBusyLock.current = true;
+  setStripeBusy(true);
+  try {
+    const { error } = await supabase.functions.invoke('create-connect-account');
+    if (error) throw error;
+    await loadStripePaymentStatus();
+  } catch (error) {
+    console.error('Stripe refresh error:', error);
+    setStripePaymentStatus('error');
+    setStripeStatusMessage('Could not refresh your Stripe account. Please try again.');
+  } finally {
+    stripeBusyLock.current = false;
+    setStripeBusy(false);
+  }
+};
+
+const handleSetUpPayments = async () => {
+  if (stripeBusyLock.current) return;
+  stripeBusyLock.current = true;
+  setStripeBusy(true);
+  try {
     const { error: accountError } = await supabase.functions.invoke(
       'create-connect-account'
     );
+    if (accountError) throw accountError;
 
-    if (accountError) {
-      throw accountError;
-    }
-
-    // Generate a fresh onboarding link.
     const { data, error } = await supabase.functions.invoke(
       'create-connect-account-link'
     );
-
-    if (error) {
-      throw error;
-    }
-
-    if (!data?.url) {
+    if (error) throw error;
+    if (typeof data?.url !== 'string' || !data.url.startsWith('https://')) {
       throw new Error('Stripe onboarding link was not returned.');
     }
 
-    // Open Stripe's hosted onboarding in the browser.
     await WebBrowser.openBrowserAsync(data.url);
-
-    // Refresh the Stripe account status after returning.
-    await supabase.functions.invoke('create-connect-account');
-
-    Alert.alert(
-      'Stripe',
-      'Your payment setup status has been refreshed.'
+    // Closing the browser does not prove that onboarding was completed.
+    const { error: refreshError } = await supabase.functions.invoke(
+      'create-connect-account'
     );
+    if (refreshError) throw refreshError;
+    await loadStripePaymentStatus();
   } catch (error: any) {
     console.error('Stripe onboarding error:', error);
-
-    Alert.alert(
-      'Payment setup',
-      error?.message || 'Could not open Stripe onboarding. Please try again.'
-    );
+    Alert.alert('Payment setup', error?.message || 'Could not open Stripe onboarding. Please try again.');
+  } finally {
+    stripeBusyLock.current = false;
+    setStripeBusy(false);
   }
 };
 
@@ -2747,8 +2792,31 @@ setAcceptedRequests((prev) => {
               payments from your clients.
             </Text>
 
+            <View style={{ padding: 12, borderRadius: 10, backgroundColor: COLORS.muted }}>
+              <Text style={{ fontWeight: '700', color: COLORS.foreground, marginBottom: 4 }}>
+                {stripePaymentStatus === 'enabled' ? 'Test payments enabled' :
+                 stripePaymentStatus === 'pending' ? 'Setup pending' :
+                 stripePaymentStatus === 'not_connected' ? 'Not connected' :
+                 stripePaymentStatus === 'error' ? 'Status unavailable' : 'Checking status...'}
+              </Text>
+              <Text style={{ color: COLORS.mutedForeground, fontSize: 13 }}>
+                {stripeStatusMessage}
+              </Text>
+            </View>
+
+            <Pressable
+              onPress={refreshStripePaymentStatus}
+              disabled={stripeBusy}
+              style={{ padding: 12, borderRadius: 12, borderWidth: 1, borderColor: COLORS.border, alignItems: 'center', opacity: stripeBusy ? 0.5 : 1 }}
+            >
+              <Text style={{ color: COLORS.primary, fontWeight: '700' }}>
+                {stripeBusy ? 'Checking...' : 'Refresh Payment Status'}
+              </Text>
+            </Pressable>
+
             <Pressable
               onPress={handleSetUpPayments}
+              disabled={stripeBusy}
               style={{
                 backgroundColor: COLORS.primary,
                 padding: 15,
@@ -2763,7 +2831,7 @@ setAcceptedRequests((prev) => {
                   fontSize: 15,
                 }}
               >
-                Set Up Payments
+                {stripeBusy ? 'Please wait...' : stripePaymentStatus === 'enabled' ? 'Manage Stripe Setup' : 'Set Up Payments'}
               </Text>
             </Pressable>
 
