@@ -190,28 +190,15 @@ Deno.serve(async (req) => {
       }
     }
 
-    // Reserve one payment record before contacting Stripe.
-    const { data: reservedPayment, error: reservationError } =
-      await db
-        .from('appointment_payments')
-        .upsert(
-          {
-            appointment_id: appointment.id,
-            customer_id: user.id,
-            designer_id: appointment.designer_id,
-            currency: 'eur',
-            amount_total_cents: amount,
-            platform_fee_cents: 0,
-            payment_status: 'pending',
-            livemode: false,
-          },
-          {
-            onConflict: 'appointment_id',
-            ignoreDuplicates: true,
-          }
-        )
-        .select()
-        .maybeSingle();
+        // Reserve payment atomically before contacting Stripe.
+    const {
+      data: reservedPayment,
+      error: reservationError,
+    } = await db.rpc('reserve_booking_payment', {
+      p_appointment_id: appointment.id,
+      p_customer_id: user.id,
+      p_amount_cents: amount,
+    });
 
     if (reservationError) {
       console.error(
@@ -357,6 +344,10 @@ Deno.serve(async (req) => {
     const form = new URLSearchParams();
 
     form.set('mode', 'payment');
+    form.set(
+  'expires_at',
+  String(Math.floor(Date.now() / 1000) + 31 * 60)
+);
     form.set('payment_method_types[0]', 'card');
     form.set('line_items[0][price_data][currency]', 'eur');
     form.set(

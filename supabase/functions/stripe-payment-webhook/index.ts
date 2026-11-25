@@ -99,7 +99,28 @@ Deno.serve(async (req) => {
 
       if (error) throw error;
     }
+    if (event.type === 'checkout.session.expired') {
+      const session = event.data.object;
 
+      if (
+        session.livemode !== false ||
+        session.mode !== 'payment' ||
+        session.status !== 'expired' ||
+        session.payment_status !== 'unpaid' ||
+        !session.id.startsWith('cs_test_')
+      ) {
+        throw new Error('Invalid expired checkout session');
+      }
+
+      const { error } = await db.rpc(
+        'expire_booking_payment',
+        {
+          p_session_id: session.id,
+        }
+      );
+
+      if (error) throw error;
+    }
     return new Response('OK', { status: 200 });
   } catch (error) {
     console.error('Webhook processing failed', error);
