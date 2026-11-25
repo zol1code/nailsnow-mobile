@@ -121,6 +121,45 @@ Deno.serve(async (req) => {
 
       if (error) throw error;
     }
+        if (
+      event.type === 'refund.created' ||
+      event.type === 'refund.updated' ||
+      event.type === 'refund.failed'
+    ) {
+      const refund = event.data.object;
+
+      const appointmentId =
+        refund.metadata?.appointment_id;
+
+      if (
+        refund.metadata?.source !== 'nailsnow'
+      ) {
+        return new Response('Ignored', { status: 200 });
+      }
+
+      if (
+        !appointmentId ||
+        typeof refund.payment_intent !== 'string' ||
+        refund.currency !== 'eur' ||
+        !refund.status ||
+        !refund.id.startsWith('re_')
+      ) {
+        throw new Error('Invalid refund details');
+      }
+
+      const { error } = await db.rpc(
+        'complete_booking_refund',
+        {
+          p_appointment_id: appointmentId,
+          p_refund_id: refund.id,
+          p_payment_intent_id: refund.payment_intent,
+          p_amount_cents: refund.amount,
+          p_refund_status: refund.status,
+        }
+      );
+
+      if (error) throw error;
+    }
     return new Response('OK', { status: 200 });
   } catch (error) {
     console.error('Webhook processing failed', error);

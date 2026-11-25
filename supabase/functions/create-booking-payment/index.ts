@@ -236,7 +236,12 @@ Deno.serve(async (req) => {
         error: 'Payment details mismatch',
       });
     }
-
+    if (payment.cancellation_requested_at !== null) {
+      return reply(409, {
+        error: 'Cancellation has already been requested',
+        code: 'CANCELLATION_REQUESTED',
+      });
+    }
     if (payment.payment_status !== 'pending') {
       return reply(409, {
         error: 'Payment is no longer pending',
@@ -403,6 +408,28 @@ Deno.serve(async (req) => {
     const savedForm = new URLSearchParams(
       prepared.checkout_request
     );
+        const { data: currentPayment, error: currentError } =
+      await db
+        .from('appointment_payments')
+        .select('payment_status,cancellation_requested_at')
+        .eq('id', payment.id)
+        .single();
+
+    if (currentError || !currentPayment) {
+      return reply(500, {
+        error: 'Unable to verify payment state',
+      });
+    }
+
+    if (
+      currentPayment.cancellation_requested_at !== null ||
+      currentPayment.payment_status !== 'pending'
+    ) {
+      return reply(409, {
+        error: 'Checkout is no longer available',
+        code: 'CHECKOUT_BLOCKED',
+      });
+    }
     const response = await fetch(
       'https://api.stripe.com/v1/checkout/sessions',
       {
