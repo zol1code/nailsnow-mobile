@@ -80,7 +80,21 @@ Deno.serve(async (req) => {
       const parsed = new URL(url);
       if (parsed.protocol !== 'https:') return reply(503, { error: 'Checkout redirect URLs must use HTTPS' });
     }
+      const { data: existingPayment, error: lookupError } = await db
+      .from('appointment_payments')
+      .select('stripe_checkout_session_id,payment_status')
+      .eq('appointment_id', appointment.id)
+      .maybeSingle();
 
+    if (lookupError) {
+      return reply(500, { error: 'Unable to verify existing payment' });
+    }
+
+    if (existingPayment) {
+      return reply(409, {
+        error: 'A payment already exists for this appointment',
+      });
+    }
     const form = new URLSearchParams();
     form.set('mode', 'payment');
     form.set('payment_method_types[0]', 'card');
@@ -100,6 +114,7 @@ Deno.serve(async (req) => {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${stripeKey}`,
+'Idempotency-Key': `nailsnow-booking-${appointment.id}`,
         'Content-Type': 'application/x-www-form-urlencoded',
       },
       body: form,
@@ -110,7 +125,26 @@ Deno.serve(async (req) => {
       console.error('Stripe checkout session creation failed', response.status, session?.error?.code);
       return reply(502, { error: 'Unable to start checkout' });
     }
+      const { error: paymentError } = await db
+      .from('appointment_payments')
+      .upsert({
+        appointment_id: appointment.id,
+        customer_id: user.id,
+        designer_id: appointment.designer_id,
+        stripe_checkout_session_id: session.id,
+        currency: 'eur',
+        amount_total_cents: amount,
+        platform_fee_cents: 0,
+        livemode: false,
+      }, {
+        onConflict: 'appointment_id',
+        ignoreDuplicates: true,
+      });
 
+    if (paymentError) {
+      console.error('Payment registration failed', paymentError.code);
+      return reply(500, { error: 'Unable to register payment' });
+    }
     // Payment is NOT marked paid here. Only a verified Stripe webhook may do that.
     return reply(200, { checkoutUrl: session.url, sessionId: session.id });
   } catch (error) {

@@ -13,3 +13,7 @@ entrypoint = "./functions/stripe-return/index.ts"
 enabled = true
 verify_jwt = true
 entrypoint = "./functions/create-booking-payment/index.ts"
+[functions.stripe-payment-webhook]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/stripe-payment-webhook/index.ts"
