@@ -192,7 +192,7 @@ Deno.serve(async (req) => {
 
         // Reserve payment atomically before contacting Stripe.
     const {
-      data: reservedPayment,
+      
       error: reservationError,
     } = await db.rpc('reserve_booking_payment', {
       p_appointment_id: appointment.id,
@@ -313,14 +313,7 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Only the request that created the reservation may
-    // create a new Stripe Checkout session.
-    if (!reservedPayment) {
-      return reply(409, {
-        error: 'Payment creation requires verification',
-        code: 'PAYMENT_CREATION_PENDING',
-      });
-    }
+   
 
     // Recheck appointment status before contacting Stripe.
     const { data: latestAppointment, error: latestError } =
@@ -344,10 +337,6 @@ Deno.serve(async (req) => {
     const form = new URLSearchParams();
 
     form.set('mode', 'payment');
-    form.set(
-  'expires_at',
-  String(Math.floor(Date.now() / 1000) + 31 * 60)
-);
     form.set('payment_method_types[0]', 'card');
     form.set('line_items[0][price_data][currency]', 'eur');
     form.set(
@@ -384,17 +373,46 @@ Deno.serve(async (req) => {
     );
 
     form.set('cancel_url', cancelUrl);
+    const { data: prepared, error: prepareError } =
+      await db.rpc('prepare_booking_checkout', {
+        p_appointment_id: appointment.id,
+        p_checkout_request: Object.fromEntries(form.entries()),
+      });
 
+    if (prepareError || !prepared) {
+      return reply(409, {
+        error: 'Unable to prepare checkout',
+      });
+    }
+
+    const startedAt = Date.parse(prepared.started_at);
+    const expiresAt = Date.parse(prepared.expires_at);
+
+    if (
+      !Number.isFinite(startedAt) ||
+      !Number.isFinite(expiresAt) ||
+      Date.now() - startedAt > 15 * 60 * 1000 ||
+      Date.now() >= expiresAt
+    ) {
+      return reply(409, {
+        error: 'Checkout requires reconciliation',
+        code: 'CHECKOUT_RECOVERY_REQUIRED',
+      });
+    }
+
+    const savedForm = new URLSearchParams(
+      prepared.checkout_request
+    );
     const response = await fetch(
       'https://api.stripe.com/v1/checkout/sessions',
       {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${stripeKey}`,
-          'Idempotency-Key': `nailsnow-booking-${appointment.id}`,
+          'Idempotency-Key': prepared.idempotency_key,
           'Content-Type': 'application/x-www-form-urlencoded',
         },
-        body: form,
+        body: savedForm,
         signal: AbortSignal.timeout(20000),
       }
     );
@@ -436,16 +454,35 @@ Deno.serve(async (req) => {
         .select('id')
         .single();
 
-    if (saveError || !savedPayment) {
-      console.error(
-        'Checkout registration failed',
-        saveError?.code
-      );
+  if (saveError || !savedPayment) {
+  const { data: registered, error: registeredError } =
+    await db
+      .from('appointment_payments')
+      .select('stripe_checkout_session_id,payment_status')
+      .eq('id', payment.id)
+      .single();
 
-      return reply(500, {
-        error: 'Unable to register checkout',
-      });
-    }
+  if (
+    registeredError ||
+    !registered ||
+    registered.stripe_checkout_session_id !== session.id
+  ) {
+    console.error(
+      'Checkout registration failed',
+      saveError?.code
+    );
+
+    return reply(500, {
+      error: 'Unable to register checkout',
+    });
+  }
+
+  if (registered.payment_status !== 'pending') {
+    return reply(409, {
+      error: 'Payment is no longer pending',
+    });
+  }
+}
 
     // Only the verified webhook can confirm payment.
     return reply(200, {
