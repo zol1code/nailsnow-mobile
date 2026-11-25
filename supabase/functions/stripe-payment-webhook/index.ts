@@ -89,16 +89,13 @@ Deno.serve(async (req) => {
         throw new Error('Payment validation failed');
       }
 
-      const { error } = await db
-        .from('appointment_payments')
-        .update({
-          payment_status: 'paid',
-          stripe_payment_intent_id: session.payment_intent,
-          paid_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', payment.id)
-        .eq('payment_status', 'pending');
+            const { error } = await db.rpc(
+        'confirm_booking_payment',
+        {
+          p_session_id: session.id,
+          p_payment_intent_id: session.payment_intent,
+        }
+      );
 
       if (error) throw error;
     }
