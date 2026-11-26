@@ -68,14 +68,14 @@ Deno.serve(async (req) => {
     );
 
     const stripe = new Stripe(stripeKey, {
-      timeout: 20000,
+      timeout: 10000
       maxNetworkRetries: 0,
     });
 
    
     const { data: payments, error: claimError } =
       await db.rpc('claim_payment_reconciliation', {
-        p_limit: 3,
+        p_limit: 1
       });
 
     if (claimError) {
@@ -90,7 +90,7 @@ Deno.serve(async (req) => {
       errors: 0,
     };
 
-    for (const payment of payments ?? []) {
+    for (let payment of payments ?? []) {
       let result = 'retry';
       let retryMinutes = 5;
       let errorMessage: string | null = null;
@@ -115,6 +115,32 @@ Deno.serve(async (req) => {
 
 
       try {
+
+        const {
+          data: freshPayment,
+          error: refreshError,
+        } = await db
+          .from('appointment_payments')
+          .select('*')
+          .eq('id', payment.id)
+          .eq(
+            'reconciliation_lock_token',
+            payment.reconciliation_lock_token
+          )
+          .eq('livemode', false)
+          .single();
+
+        if (refreshError || !freshPayment) {
+          throw new Error(
+            'PAYMENT_REFRESH_FAILED'
+          );
+        }
+
+        payment = freshPayment;
+
+        await assertValidLock();
+
+
         if (payment.livemode !== false) {
           throw new Error('LIVE_PAYMENT_BLOCKED');
         }
