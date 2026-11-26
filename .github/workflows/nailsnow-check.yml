@@ -1,3 +1,4 @@
+
 name: NailsNow Code Check
 
 on:
@@ -9,8 +10,8 @@ permissions:
   contents: read
 
 jobs:
-  mobile-check:
-    name: Check React Native
+  frontend-check:
+    name: Check TypeScript
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -43,7 +44,7 @@ jobs:
       - name: Check booking payment
         run: deno check --no-config supabase/functions/create-booking-payment/index.ts
 
-            - name: Check Stripe webhook
+      - name: Check Stripe webhook
         run: deno check --no-config supabase/functions/stripe-payment-webhook/index.ts
 
       - name: Check booking cancellation
