@@ -156,7 +156,43 @@ Deno.serve(async (req) => {
       });
     }
 
-    if (!payment.cancellation_requested_at) {
+   
+    // Return completed refunds without creating another.
+    if (payment.payment_status === 'refunded') {
+      return reply(200, {
+        result: 'refund_completed',
+        refundStatus: 'succeeded',
+      });
+    }
+
+    // Return previously closed unpaid bookings.
+    if (
+      payment.payment_status === 'cancelled' ||
+      payment.payment_status === 'expired'
+    ) {
+      if (
+        cancellation?.status === 'cancelled' ||
+        cancellation?.status === 'declined'
+      ) {
+        return reply(200, {
+          result: 'already_closed',
+          status: cancellation.status,
+        });
+      }
+    }
+
+    // Allow reconciliation of late payments.
+    const closedBookingNeedsRefund =
+      (
+        cancellation?.status === 'cancelled' ||
+        cancellation?.status === 'declined'
+      ) &&
+      payment.payment_status === 'refund_pending';
+
+    if (
+      !payment.cancellation_requested_at &&
+      !closedBookingNeedsRefund
+    ) {
       return reply(409, {
         result: 'payment_review_required',
       });
@@ -245,6 +281,59 @@ Deno.serve(async (req) => {
         });
 
       if (prepareError) throw prepareError;
+
+      // Reconcile an existing Stripe refund.
+      if (
+        prepared?.result === 'refund_already_registered'
+      ) {
+        const refund = await stripe.refunds.retrieve(
+          prepared.refund_id
+        );
+
+        if (
+          refund.id !== prepared.refund_id ||
+          refund.metadata?.appointment_id !== appointmentId ||
+          refund.metadata?.source !== 'nailsnow' ||
+          typeof refund.payment_intent !== 'string' ||
+          refund.payment_intent !== payment.stripe_payment_intent_id ||
+          refund.amount !== Number(payment.amount_total_cents) ||
+          refund.currency !== 'eur' ||
+          !refund.status
+        ) {
+          throw new Error(
+            'Existing refund validation failed'
+          );
+        }
+
+        const { error: reconciliationError } =
+          await db.rpc('complete_booking_refund', {
+            p_appointment_id: appointmentId,
+            p_refund_id: refund.id,
+            p_payment_intent_id: refund.payment_intent,
+            p_amount_cents: refund.amount,
+            p_refund_status: refund.status,
+          });
+
+        if (reconciliationError) {
+          throw reconciliationError;
+        }
+
+        return reply(
+          refund.status === 'succeeded' ? 200 : 202,
+          {
+            result: 'refund_reconciled',
+            refundStatus: refund.status,
+          }
+        );
+      }
+
+      if (prepared?.result === 'refund_completed') {
+        return reply(200, {
+          result: 'refund_completed',
+          refundStatus: 'succeeded',
+        });
+      }
+
 
       if (prepared?.result !== 'refund_prepared') {
         return reply(202, {

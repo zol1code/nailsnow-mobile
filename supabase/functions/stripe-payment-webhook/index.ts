@@ -176,7 +176,19 @@ Deno.serve(async (req) => {
       event.type === 'refund.updated' ||
       event.type === 'refund.failed'
     ) {
-      const refund = event.data.object;
+      
+const eventRefund = event.data.object;
+
+if (eventRefund.metadata?.source !== 'nailsnow') {
+  return new Response('Ignored', {
+    status: 200,
+  });
+}
+
+const refund = await stripe.refunds.retrieve(
+  eventRefund.id
+);
+
 
       const appointmentId =
         refund.metadata?.appointment_id;
