@@ -43,6 +43,8 @@ jobs:
       - name: Check booking payment
         run: deno check --no-config supabase/functions/create-booking-payment/index.ts
 
-      - name: Check Stripe webhook
+            - name: Check Stripe webhook
         run: deno check --no-config supabase/functions/stripe-payment-webhook/index.ts
-        deno check --no-config supabase/functions/cancel-booking-payment/index.ts
+
+      - name: Check booking cancellation
+        run: deno check --no-config supabase/functions/cancel-booking-payment/index.ts
