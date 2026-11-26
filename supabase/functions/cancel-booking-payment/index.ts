@@ -335,6 +335,72 @@ Deno.serve(async (req) => {
       }
 
 
+      if (
+        prepared?.result === 'refund_reconciliation_required'
+      ) {
+        const paymentIntentId =
+          payment.stripe_payment_intent_id;
+
+        if (!paymentIntentId) {
+          throw new Error('Missing payment intent');
+        }
+
+        const matchingRefunds: Stripe.Refund[] = [];
+
+        for await (const refund of stripe.refunds.list({
+          payment_intent: paymentIntentId,
+          limit: 100,
+        })) {
+          if (
+            refund.metadata?.appointment_id === appointmentId &&
+            refund.metadata?.source === 'nailsnow'
+          ) {
+            matchingRefunds.push(refund);
+          }
+        }
+
+        if (matchingRefunds.length !== 1) {
+          return reply(202, {
+            result: 'refund_manual_review_required',
+          });
+        }
+
+        const refund = matchingRefunds[0];
+
+        if (
+          typeof refund.payment_intent !== 'string' ||
+          refund.payment_intent !== paymentIntentId ||
+          refund.amount !== Number(payment.refund_amount_cents) ||
+          refund.amount !== Number(payment.amount_total_cents) ||
+          refund.currency !== 'eur' ||
+          !refund.status
+        ) {
+          throw new Error('Refund reconciliation validation failed');
+        }
+
+        const { error: recoveryError } =
+          await db.rpc('complete_booking_refund', {
+            p_appointment_id: appointmentId,
+            p_refund_id: refund.id,
+            p_payment_intent_id: refund.payment_intent,
+            p_amount_cents: refund.amount,
+            p_refund_status: refund.status,
+          });
+
+        if (recoveryError) {
+          throw recoveryError;
+        }
+
+        return reply(
+          refund.status === 'succeeded' ? 200 : 202,
+          {
+            result: 'refund_recovered',
+            refundStatus: refund.status,
+          }
+        );
+      }
+
+
       if (prepared?.result !== 'refund_prepared') {
         return reply(202, {
           result: prepared?.result ??

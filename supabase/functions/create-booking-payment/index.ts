@@ -306,6 +306,66 @@ Deno.serve(async (req) => {
         session.payment_status === 'unpaid' &&
         session.url
       ) {
+
+    // Verify payment state before returning checkout.
+    const {
+      data: finalPayment,
+      error: finalPaymentError,
+    } = await db
+      .from('appointment_payments')
+      .select(
+        'payment_status, cancellation_requested_at, stripe_checkout_session_id'
+      )
+      .eq('id', payment.id)
+      .single();
+
+    if (finalPaymentError || !finalPayment) {
+      return reply(500, {
+        error: 'Unable to verify final payment state',
+      });
+    }
+
+    if (
+      finalPayment.cancellation_requested_at !== null ||
+      finalPayment.payment_status !== 'pending' ||
+      finalPayment.stripe_checkout_session_id !== session.id
+    ) {
+      return reply(409, {
+        error: 'Checkout is no longer available',
+        code: 'CHECKOUT_BLOCKED',
+      });
+    }
+
+
+        const {
+          data: existingPayment,
+          error: existingPaymentError,
+        } = await db
+          .from('appointment_payments')
+          .select(
+            'payment_status, cancellation_requested_at, stripe_checkout_session_id'
+          )
+          .eq('id', payment.id)
+          .single();
+
+        if (existingPaymentError || !existingPayment) {
+          return reply(500, {
+            error: 'Unable to verify existing payment',
+          });
+        }
+
+        if (
+          existingPayment.cancellation_requested_at !== null ||
+          existingPayment.payment_status !== 'pending' ||
+          existingPayment.stripe_checkout_session_id !== payment.stripe_checkout_session_id
+        ) {
+          return reply(409, {
+            error: 'Checkout is no longer available',
+            code: 'CHECKOUT_BLOCKED',
+          });
+        }
+
+
         return reply(200, {
           checkoutUrl: session.url,
           sessionId: session.id,

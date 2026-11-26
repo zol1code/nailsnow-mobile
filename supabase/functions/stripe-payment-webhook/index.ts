@@ -33,6 +33,26 @@ Deno.serve(async (req) => {
   let event: Stripe.Event;
 
   try {
+
+    // Ignore checkout sessions unrelated to NailsNow.
+    if (
+      event.type === 'checkout.session.completed' ||
+      event.type === 'checkout.session.expired'
+    ) {
+      const checkoutSession = event.data.object;
+
+      if (
+        !checkoutSession.metadata?.appointment_id &&
+        !checkoutSession.metadata?.customer_id &&
+        !checkoutSession.metadata?.designer_id
+      ) {
+        return new Response('Ignored', {
+          status: 200,
+        });
+      }
+    }
+
+
     event = await stripe.webhooks.constructEventAsync(
       body,
       signature,
