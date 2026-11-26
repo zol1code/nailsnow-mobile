@@ -396,7 +396,7 @@ Deno.serve(async (req) => {
     if (
       !Number.isFinite(startedAt) ||
       !Number.isFinite(expiresAt) ||
-      Date.now() - startedAt > 15 * 60 * 1000 ||
+      Date.now() - startedAt > 10 * 60 * 1000 ||
       Date.now() >= expiresAt
     ) {
       return reply(409, {

@@ -55,6 +55,56 @@ Deno.serve(async (req) => {
   });
 
   try {
+
+    // Recover checkout sessions after interrupted requests.
+    if (
+      event.type === 'checkout.session.completed' ||
+      event.type === 'checkout.session.expired'
+    ) {
+      const session = event.data.object;
+
+      const appointmentId =
+        session.metadata?.appointment_id;
+
+      const customerId =
+        session.metadata?.customer_id;
+
+      const designerId =
+        session.metadata?.designer_id;
+
+      if (
+        session.livemode !== false ||
+        session.mode !== 'payment' ||
+        !session.id.startsWith('cs_test_') ||
+        !appointmentId ||
+        !customerId ||
+        !designerId ||
+        session.amount_total === null ||
+        session.amount_total <= 0 ||
+        session.currency !== 'eur' ||
+        session.client_reference_id !== appointmentId
+      ) {
+        throw new Error(
+          'Invalid checkout recovery details'
+        );
+      }
+
+      const { error: recoveryError } = await db.rpc(
+        'recover_booking_checkout',
+        {
+          p_appointment_id: appointmentId,
+          p_session_id: session.id,
+          p_customer_id: customerId,
+          p_designer_id: designerId,
+          p_amount_cents: session.amount_total,
+          p_currency: session.currency,
+        }
+      );
+
+      if (recoveryError) throw recoveryError;
+    }
+
+
     if (event.type === 'checkout.session.completed') {
       const session = event.data.object;
 
