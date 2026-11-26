@@ -68,7 +68,7 @@ Deno.serve(async (req) => {
     );
 
     const stripe = new Stripe(stripeKey, {
-      timeout: 10000
+      timeout: 10000,
       maxNetworkRetries: 0,
     });
 
