@@ -34,23 +34,7 @@ Deno.serve(async (req) => {
 
   try {
 
-    // Ignore checkout sessions unrelated to NailsNow.
-    if (
-      event.type === 'checkout.session.completed' ||
-      event.type === 'checkout.session.expired'
-    ) {
-      const checkoutSession = event.data.object;
 
-      if (
-        !checkoutSession.metadata?.appointment_id &&
-        !checkoutSession.metadata?.customer_id &&
-        !checkoutSession.metadata?.designer_id
-      ) {
-        return new Response('Ignored', {
-          status: 200,
-        });
-      }
-    }
 
 
     event = await stripe.webhooks.constructEventAsync(
@@ -69,6 +53,25 @@ Deno.serve(async (req) => {
       status: 400,
     });
   }
+
+    // Ignore checkout sessions unrelated to NailsNow.
+    if (
+      event.type === 'checkout.session.completed' ||
+      event.type === 'checkout.session.expired'
+    ) {
+      const checkoutSession = event.data.object;
+
+      if (
+        !checkoutSession.metadata?.appointment_id &&
+        !checkoutSession.metadata?.customer_id &&
+        !checkoutSession.metadata?.designer_id
+      ) {
+        return new Response('Ignored', {
+          status: 200,
+        });
+      }
+    }
+
 
   const db = createClient(supabaseUrl, serviceKey, {
     auth: { persistSession: false },
