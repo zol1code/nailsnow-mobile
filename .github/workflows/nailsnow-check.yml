@@ -45,3 +45,4 @@ jobs:
 
       - name: Check Stripe webhook
         run: deno check --no-config supabase/functions/stripe-payment-webhook/index.ts
+        deno check --no-config supabase/functions/cancel-booking-payment/index.ts
