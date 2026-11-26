@@ -19,3 +19,5 @@ verify_jwt = false
 entrypoint = "./functions/stripe-payment-webhook/index.ts"
 [functions.cancel-booking-payment]
 verify_jwt = true
+[functions.reconcile-booking-payments]
+verify_jwt = false

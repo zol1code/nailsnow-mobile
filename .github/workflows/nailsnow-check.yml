@@ -49,3 +49,6 @@ jobs:
 
       - name: Check booking cancellation
         run: deno check --no-config supabase/functions/cancel-booking-payment/index.ts
+        
+      - name: Check booking reconciliation
+        run: deno check --no-config supabase/functions/reconcile-booking-payments/index.ts
