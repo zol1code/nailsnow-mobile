@@ -39,6 +39,7 @@ const [instagram, setInstagram] = useState('');
 const [yearsExperience, setYearsExperience] = useState('');
 // Stores the designer's private phone number.
 const [phone, setPhone] = useState('');
+const [privateDetailsLoaded, setPrivateDetailsLoaded] = useState(false);
 // Stores the designer's starting service price.
 const [startingPrice, setStartingPrice] = useState('');
   // Stores the designer's current profile photo URL.
@@ -46,6 +47,9 @@ const [avatarUrl, setAvatarUrl] = useState('');
 const [preparingStripe, setPreparingStripe] = useState(false);
 const [stripeFeedback, setStripeFeedback] = useState('');
 const stripeLock = useRef(false);
+const [savingProfile, setSavingProfile] = useState(false);
+const [profileFeedback, setProfileFeedback] = useState('');
+const profileSaveLock = useRef(false);
 
 async function prepareStripeAccount() {
   if (stripeLock.current) return;
@@ -135,7 +139,7 @@ async function prepareStripeAccount() {
 // Loads all editable designer profile fields from Supabase.
 // Loads all editable designer profile fields from Supabase.
 .select(
-  'name, bio, location, avatar_url, instagram, years_experience, phone, starting_price'
+ 'name, bio, location, avatar_url, instagram, years_experience, starting_price'
 )      .eq('id', user.id)
         .maybeSingle();
 
@@ -157,8 +161,23 @@ setYearsExperience(
   profile.years_experience != null
     ? String(profile.years_experience): ''
 );
-// Loads the designer's saved phone number.
-setPhone(profile.phone ?? '');
+
+// Loads the designer's private phone number.
+const { data: privateDetails, error: privateError } =
+  await supabase
+    .from('profile_private_details')
+    .select('phone')
+    .eq('user_id', user.id)
+    .maybeSingle();
+
+if (privateError) {
+  console.log('Private profile load error:', privateError.message);
+  return;
+}
+
+setPhone(privateDetails?.phone ?? '');
+setPrivateDetailsLoaded(true);
+
 // Loads the designer's saved starting price.
 setStartingPrice(
   profile.starting_price != null
@@ -191,88 +210,133 @@ const pickProfileImage = async () => {
     setAvatarUrl(result.assets[0].uri);
   }
 };
-// Saves the edited designer profile to Supabase.
-const saveProfile = async () => {
-  // Gets the currently authenticated user.
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
 
-  if (!user) {
+const saveProfile = async () => {
+  if (!privateDetailsLoaded || profileSaveLock.current) {
     return;
   }
 
-  // Keeps the current avatar URL unless the designer selected
-  // a new local photo from the phone.
-  let finalAvatarUrl = avatarUrl;
+  profileSaveLock.current = true;
+  setSavingProfile(true);
+  setProfileFeedback('');
 
-  if (avatarUrl && !avatarUrl.startsWith('http')) {
-    // Reads the selected photo from the phone.
-    const response = await fetch(avatarUrl);
-    const imageData = await response.arrayBuffer();
+  try {
+    const parsedYears =
+      yearsExperience.trim() === ''
+        ? null
+        : Number(yearsExperience);
 
-    // Saves each user's avatar inside a folder named with their user ID.
-    const filePath = `${user.id}/avatar.jpg`;
+    const parsedPrice =
+      startingPrice.trim() === ''
+        ? null
+        : Number(startingPrice.trim().replace(',', '.'));
 
-    const { error: uploadError } = await supabase.storage
-      .from('avatars')
-      .upload(filePath, imageData, {
-        contentType: 'image/jpeg',
-        upsert: true,
-      });
-
-    if (uploadError) {
-      console.log('Avatar upload error:', uploadError.message);
+    if (
+      parsedYears !== null &&
+      (
+        !Number.isInteger(parsedYears) ||
+        parsedYears < 0 ||
+        parsedYears > 32767
+      )
+    ) {
+      setProfileFeedback(
+        'Please enter a valid number of years of experience.'
+      );
       return;
     }
 
-    // Gets the public URL that can be stored in the profile table.
-    const { data: publicUrlData } = supabase.storage
-      .from('avatars')
-      .getPublicUrl(filePath);
+    if (
+      parsedPrice !== null &&
+      (
+        !Number.isFinite(parsedPrice) ||
+        parsedPrice < 0
+      )
+    ) {
+      setProfileFeedback(
+        'Please enter a valid starting price.'
+      );
+      return;
+    }
 
-    finalAvatarUrl = publicUrlData.publicUrl;
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser();
+
+    if (authError || !user) {
+      setProfileFeedback('Please sign in again.');
+      return;
+    }
+
+    let finalAvatarUrl = avatarUrl;
+
+    if (avatarUrl && !avatarUrl.startsWith('http')) {
+      const response = await fetch(avatarUrl);
+      const imageData = await response.arrayBuffer();
+
+      const filePath = `${user.id}/avatar.jpg`;
+
+      const { error: uploadError } = await supabase.storage
+        .from('avatars')
+        .upload(filePath, imageData, {
+          contentType: 'image/jpeg',
+          upsert: true,
+        });
+
+      if (uploadError) {
+        setProfileFeedback(
+          'Could not upload your profile photo. Please try again.'
+        );
+        return;
+      }
+
+      const { data: publicUrlData } = supabase.storage
+        .from('avatars')
+        .getPublicUrl(filePath);
+
+      finalAvatarUrl = publicUrlData.publicUrl;
+    }
+
+    const { data, error } = await supabase.rpc(
+      'save_designer_profile',
+      {
+        p_name: name.trim(),
+        p_bio: bio.trim(),
+        p_location: location.trim(),
+        p_instagram: instagram.trim(),
+        p_years_experience: parsedYears,
+        p_avatar_url: finalAvatarUrl || null,
+        p_starting_price: parsedPrice,
+        p_phone: phone.trim() || null,
+      }
+    );
+
+    if (error || data !== true) {
+      setProfileFeedback(
+        'Could not save your profile. Please try again.'
+      );
+      return;
+    }
+
+    router.back();
+
+  } catch {
+    setProfileFeedback(
+      'Could not confirm the save. Please check your connection.'
+    );
+
+  } finally {
+    profileSaveLock.current = false;
+    setSavingProfile(false);
   }
-
-  // Updates the logged-in designer's profile.
-  const { error } = await supabase
-    .from('profiles')
-   .update({
-  name: name.trim(),
-  bio: bio.trim(),
-  location: location.trim(),
-  instagram: instagram.trim(),
-  years_experience:
-    yearsExperience.trim() === ''
-      ? null
-      : Number(yearsExperience),
-
-  // Saves the designer's private phone number.
-  phone: phone.trim(),
-
-  avatar_url: finalAvatarUrl || null,
-  // Saves the designer's starting price as a numeric value.
-starting_price:
-  startingPrice.trim() === ''
-    ? null
-    : Number(startingPrice),
-})
-    .eq('id', user.id);
-
-  if (error) {
-    console.log('Profile update error:', error.message);
-    return;
-  }
-
-  // Returns to the dashboard after saving successfully.
-  router.back();
 };
+
 
   return (
     <ScrollView style={styles.container}>
       <View style={styles.header}>
         <Pressable onPress={() => router.back()}>
-          <Text style={styles.back}>‹</Text>
+          <Text style={styles.back}>â€¹</Text>
         </Pressable>
 
         <Text style={styles.title}>Edit Profile</Text>
@@ -345,7 +409,7 @@ starting_price:
   placeholder="+353 87 123 4567"
   keyboardType="phone-pad"
 />
-<Text style={styles.label}>STARTING PRICE (€)</Text>
+<Text style={styles.label}>STARTING PRICE (â‚¬)</Text>
 <TextInput
   value={startingPrice}
   onChangeText={setStartingPrice}
@@ -354,12 +418,42 @@ starting_price:
   keyboardType="decimal-pad"
 />
         {/* Saves the edited profile when the button is pressed. */}
+
+
 <Pressable
-  style={styles.saveButton}
+  style={[
+    styles.saveButton,
+    (!privateDetailsLoaded || savingProfile) && {
+      opacity: 0.5,
+    },
+  ]}
   onPress={saveProfile}
+  disabled={!privateDetailsLoaded || savingProfile}
 >
-  <Text style={styles.saveButtonText}>Save Changes</Text>
+  <Text style={styles.saveButtonText}>
+    {savingProfile
+      ? 'Saving...'
+      : privateDetailsLoaded
+        ? 'Save Changes'
+        : 'Profile not loaded'}
+  </Text>
 </Pressable>
+
+{!!profileFeedback && (
+  <Text
+    selectable
+    accessibilityRole="alert"
+    style={{
+      color: COLORS.foreground,
+      fontSize: 13,
+      marginTop: 8,
+    }}
+  >
+    {profileFeedback}
+  </Text>
+)}
+
+
 <View
   style={{
     marginTop: 24,
@@ -396,7 +490,7 @@ starting_price:
   >
     <Text style={styles.saveButtonText}>
       {preparingStripe
-        ? 'Preparing…'
+        ? 'Preparingâ€¦'
         : 'Prepare Stripe test account'}
     </Text>
   </Pressable>
